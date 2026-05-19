@@ -3,21 +3,25 @@ import config_ukf as c
 import visualisation as vis
 
 
-batch_name = "kordingwolpert_sim" # Defines folder name
+batch_name = "kordingwolpert_sim_vis1" # Defines folder name
 save_results = True
 param_grid = {
     "task_type": ["kordingwolpert2004"],
     "planned_max_time_target" : [2.0],
     "max_time_per_trial" : [2.0],
+    "apply_proprioceptive_noise": [False],
+    "apply_visual_noise": [False],
+    "apply_motor_noise": [False],
     "r_target" : [0.005],
     "n_runs": [1],
-    "n_trials": [10],
-    "visual_offset": [np.array([0.0, 0.0]), np.array([0.01, 0.0]), np.array([-0.01, 0.0]), np.array([0.005, 0.0]), np.array([-0.005, 0.0])],
+    "n_trials": [1],
+    "visual_offset": [np.array([0.0, 0.0]), np.array([0.01, 0.0]), np.array([-0.01, 0.0])],
     "prop_rad_sigma": [0.015, 0.06],
     "prop_omega_sigma": [0.015, 0.06],
     "prop_unit": ["rad"],
     "vis_p_sigma": [0.001],
-    "visual_blur": [0.001, 0.0015, 0.003],
+    # "visual_blur": [0.001, 0.0015, 0.003],
+    "visual_blur": [0.001],
     "visual_intervention_bool": [True],
     "visual_feedback_bool_onset": [0.1],
     "visual_feedback_duration": [0.1],
@@ -35,11 +39,11 @@ allowed_pairs = [
 ]
 # Define visualization functions to run for each batch iteration
 plot_functions = [  
-    # vis.plotly_animation, 
+    vis.plotly_animation2, 
     # vis.plot_joint_angles,
 ]
 plot_file_type = "pdf" # "pdf" or "png" # TODO: add png
-reps_resample = 10 # repetitions per parameter setting, spread across different cores, e.g. if param_grid gives 3 combinations and reps = 4, then 12 cores will be used
+reps_resample = 1 # repetitions per parameter setting, spread across different cores, e.g. if param_grid gives 3 combinations and reps = 4, then 12 cores will be used
 reps_identical = 1 # repetitions per parameter setting, spread across different cores, e.g. if param_grid gives 3 combinations and reps = 4, then 12 cores will be used
 
 

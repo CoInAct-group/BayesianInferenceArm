@@ -21,7 +21,13 @@ import winsound
 
 # from batches import batches_circulartask as b
 # from batches import batches_seqreachingtask as b
-from batches import batches_roll1982 as b
+# from batches import batches_roll1982 as b
+
+# from batches import batches_kordingwolpert2004_vis as b
+from batches import batches_circulartask_vis as b
+# from batches import batches_seqreachingtask_vis as b
+
+
 winsound.MessageBeep()  
 
 # Function to run a single configuration in a separate process
@@ -37,17 +43,36 @@ def run_single_config(combo_info_tuple):
         if k in b.param_grid and len(b.param_grid[k]) > 1
     }
     
+    def _format_value_for_name(value):
+        # Produce a compact, deterministic string for any value (incl. numpy arrays)
+        # so that filenames do not depend on numpy's alignment/padding in str().
+        if isinstance(value, np.ndarray):
+            value = value.tolist()
+        if isinstance(value, (list, tuple)):
+            inner = "_".join(_format_value_for_name(x) for x in value)
+            return inner
+        s = str(value)
+        # Sanitize characters that are invalid/undesirable in filenames.
+        s = s.replace(".", "p")
+        s = s.replace(" ", "")
+        for ch in ("[", "]", "(", ")", "\\", "/", ",", "\n", "\r", "\t", "'", '"'):
+            s = s.replace(ch, "")
+        return s
+
+    def _format_kv(k, v):
+        return f"{k}_{_format_value_for_name(v)}"
+
     base_run_name_part = ""
     if not filtered_combo_items: # If no params vary (or param_grid was defined with single values for all)
         if b.param_grid: # Try to use the first key from param_grid if it exists
             first_param_key = list(b.param_grid.keys())[0]
             # Get the value for this key from the current combo
-            combo_value = combo.get(first_param_key, 'default_value') 
-            base_run_name_part = f"{first_param_key}_{combo_value}".replace(".", "p").replace(" ", "_").replace("[", "").replace("]", "").replace("\\", "").replace("\n", "_")
+            combo_value = combo.get(first_param_key, 'default_value')
+            base_run_name_part = _format_kv(first_param_key, combo_value)
         else: # Fallback if param_grid is empty
             base_run_name_part = "default_run"
     else: # If there are varying parameters
-        base_run_name_part = "_".join([f"{k}_{v}".replace(".", "p").replace(" ", "_").replace("[", "").replace("]", "").replace("\\", "").replace("\n", "_") for k, v in filtered_combo_items.items()])
+        base_run_name_part = "_".join(_format_kv(k, v) for k, v in filtered_combo_items.items())
     
     # Append repetition number (rep_num is 1-indexed)
     run_name = f"{base_run_name_part}_rep_{rep_num}"
@@ -78,16 +103,20 @@ def run_single_config(combo_info_tuple):
     
     # Save results
     results_dir = f"outputs/batches/{b.batch_name}"
-    if not os.path.exists(results_dir):
-        os.makedirs(results_dir)
+    os.makedirs(results_dir, exist_ok=True)
     results["run_name"] = run_name
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     results["timestamp"] = timestamp
     run_time = time.time() - start_time
 
 
-    # Add all parameter values for this run to the results dataframe for saving
+    # Add all parameter values for this run to the results dataframe for saving.
+    # IMPORTANT: skip keys that are already columns in `results`, because those
+    # columns are populated per-step by the simulation (e.g. `visual_feedback`).
+    # Overwriting them with the scalar parameter value would destroy per-step data.
     for key, value in combo.items():
+        if key in results.columns:
+            continue
         if isinstance(value, np.ndarray):
             results[key] = str(value.tolist())
         else:
@@ -136,8 +165,7 @@ def run_single_config(combo_info_tuple):
     # Run plot functions if defined
     if hasattr(b, 'plot_functions') and b.plot_functions:
         plots_dir = f"{results_dir}/plots"
-        if not os.path.exists(plots_dir):
-            os.makedirs(plots_dir)
+        os.makedirs(plots_dir, exist_ok=True)
             
         # Format config info for plot text
         config_text_lines = []
@@ -167,8 +195,7 @@ def run_single_config(combo_info_tuple):
                 plot_name = plot_func.__name__
                 # Create subfolder per plotting function
                 func_subdir = f"{plots_dir}/{plot_name}"
-                if not os.path.exists(func_subdir):
-                    os.makedirs(func_subdir)
+                os.makedirs(func_subdir, exist_ok=True)
                 plot_filename = f"{func_subdir}/{run_name}_{plot_name}"
                 
                 # Call the plot function with the results and config info
@@ -221,8 +248,7 @@ def create_parameter_grid(param_grid):
 def save_config_files(batch_name):
     """Save copies of config.py and batches.py to the batch output folder"""
     output_dir = f"outputs/batches/{batch_name}"
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    os.makedirs(output_dir, exist_ok=True)
        
     # Copy the imported config_ukf (c) and batches (b) files
     config_src = c.__file__
@@ -266,8 +292,7 @@ def save_config_as_json(batch_name, config_module, save_name="config"):
     """
     # Create the output directory
     output_dir = f"outputs/batches/{batch_name}"
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    os.makedirs(output_dir, exist_ok=True)
     
     # Full path to the output file
     output_file_path = f"{output_dir}/{batch_name}_{save_name}.json"

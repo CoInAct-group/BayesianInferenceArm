@@ -682,10 +682,12 @@ def plotly_animation(results, show_fig=False, frame_decimation=4, annimation_spe
                         x_cart_sigmas = []
                         y_cart_sigmas = []
 
-                    if results_trial['visual_feedback'].iloc[trial_step]:
-                        x_vis_feedback = results_trial['vis_hand_x'].iloc[:trial_step][results_trial['visual_feedback'].iloc[:trial_step]]
-                        y_vis_feedback = results_trial['vis_hand_y'].iloc[:trial_step][results_trial['visual_feedback'].iloc[:trial_step]]
-                    else:
+                    # Always show all visual feedback points collected so far in this trial,
+                    # regardless of whether the current step has visual feedback available.
+                    vis_mask = results_trial['visual_feedback'].iloc[:trial_step + 1]
+                    x_vis_feedback = results_trial['vis_hand_x'].iloc[:trial_step + 1][vis_mask]
+                    y_vis_feedback = results_trial['vis_hand_y'].iloc[:trial_step + 1][vis_mask]
+                    if len(x_vis_feedback) == 0:
                         x_vis_feedback = [np.nan]
                         y_vis_feedback = [np.nan]
 
@@ -946,6 +948,1570 @@ def plotly_animation(results, show_fig=False, frame_decimation=4, annimation_spe
     fig.write_html(file_name)
     print(
         f'Plotly animated plot created with frame_decimation set to {frame_decimation}\n{len(results)} of {org_len} steps animated\nAnimation saved to: {file_name}')
+
+def plotly_animation2(results, show_fig=False, frame_decimation=1, annimation_speedup=.5, output_filename=None, extra_text=None, file_type = None):
+    org_len = len(results)
+    if org_len == 0:
+        print("Warning: results DataFrame is empty. Cannot generate plotly_animation.")
+        return
+    substract_len = org_len % frame_decimation
+    results.drop(results.index[(org_len-substract_len):], inplace=True)
+    results = results.iloc[::frame_decimation].copy()
+    if results.empty:
+        print(f"Warning: results DataFrame is empty after decimation with factor {frame_decimation}. Cannot generate plotly_animation.")
+        return
+    results['row_index'] = results.index
+    endpoints = results.groupby(['run', 'trial']).tail(1)
+    if c.elbow_down:
+        shoulder_marker = {'size': 20, 'color': 'peru'}
+        upper_arm_line = {'width': 16, 'color': 'darkorange'}
+        lower_arm_line = {'width': 12, 'color': 'orange'}
+        upper_arm_marker = {'size': 16, 'color': 'darkorange'}
+        lower_arm_marker = {'size': 12, 'color': 'orange'}
+    else:
+        shoulder_marker = {'size': 15, 'color': 'darkorange'}
+        upper_arm_line = {'width': 15, 'color': 'darkorange'}
+        lower_arm_line = {'width': 15, 'color': 'darkorange'}
+        upper_arm_marker = {'size': 15, 'color': 'darkorange'}
+        lower_arm_marker = {'size': 15, 'color': 'darkorange'}
+
+    # print(results['visual_feedback'])
+
+    lp_upper_arm_line_true = {'width': 15, 'color': 'steelblue'}
+    lp_lower_arm_line_true = {'width': 15, 'color': 'steelblue'}
+    lp_upper_arm_marker_true = {'size': 15, 'color': 'steelblue'}
+    lp_lower_arm_marker_true = {'size': 15, 'color': 'steelblue'}
+    rp_upper_arm_line_true = {'width': 5, 'color': 'steelblue'}
+    rp_lower_arm_line_true = {'width': 5, 'color': 'steelblue'}
+    rp_upper_arm_marker_true = {'size': 5, 'color': 'steelblue'}
+    rp_lower_arm_marker_true = {'size': 5, 'color': 'steelblue'}
+
+
+    fig = make_subplots(
+        rows=1,
+        cols=2,
+        subplot_titles=('', ''),
+        horizontal_spacing=0.05,
+        column_widths=[0.75, 0.25]
+    )
+    # shoulder both subplots
+    fig.add_trace(go.Scatter(
+        x=[results['true_shoulder_x'].iloc[0]],
+        y=[results['true_shoulder_y'].iloc[0]],
+        mode='markers',
+        marker=lp_upper_arm_marker_true,
+        name='Shoulder',
+        legendgroup='true_arm',
+        showlegend=False
+    ), row=1, col=1)
+    fig.add_trace(go.Scatter(
+        x=[results['true_shoulder_x'].iloc[0]],
+        y=[results['true_shoulder_y'].iloc[0]],
+        mode='markers',
+        marker=lp_upper_arm_marker_true,
+        name='Shoulder',
+        legendgroup='true_arm',
+        showlegend=False
+    ), row=1, col=2)
+
+    ### Add initial traces to Subplot 1 ###
+
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='lines+markers',
+        line=lp_lower_arm_line_true,
+        marker=lp_lower_arm_marker_true,
+        name='Lower arm',
+        legendgroup='true_arm',
+        showlegend=False
+    ), row=1, col=1)
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='lines+markers',
+        line=lp_upper_arm_line_true,
+        marker=lp_upper_arm_marker_true,
+        name='Upper arm',
+        legendgroup='true_arm',
+        showlegend=False
+    ), row=1, col=1)
+    # Previous Positions
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='markers',
+        marker=dict(size=3, color='dodgerblue', opacity=0.5),
+        name='Previous positions',
+        legendgroup='true_trajectory',
+        showlegend=True
+    ), row=1, col=1)
+    # planned trajectory
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='markers',
+        marker=dict(size=3, color='orange', opacity=0.5),
+        name='Posterior position',
+        legendgroup='planned_trajectory',
+        showlegend=True
+    ), row=1, col=1)
+    # Current Position
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='markers',
+        marker=dict(size=6, color='dodgerblue'),
+        name='Current position',
+        legendgroup='true_trajectory',
+        showlegend=True
+    ), row=1, col=1)
+
+    # Target Circle
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='lines',
+        line=dict(color='black'),
+        fill='toself',
+        fillcolor='rgba(128, 128, 128, 0.2)',
+        name='Target',
+        legendgroup='target',
+        showlegend=True
+    ), row=1, col=1)
+
+    # Input positions
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='markers',
+        marker=dict(size=4, color='darkblue', opacity=0.5),
+        name='Input position',
+        legendgroup='input_position',
+        showlegend=True
+    ), row=1, col=1)
+    # Visual feedback
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='markers',
+        marker=dict(size=4, color='green', opacity=0.3),
+        name='Visual feedback',
+        legendgroup='visual_feedback',
+        showlegend=True
+    ), row=1, col=1)
+
+    ### Add initial traces to Subplot 2 (zoomed-in copy of Subplot 1) ###
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='lines+markers',
+        line=lp_lower_arm_line_true,
+        marker=lp_lower_arm_marker_true,
+        name='Lower arm',
+        legendgroup='true_arm',
+        showlegend=False
+    ), row=1, col=2)
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='lines+markers',
+        line=lp_upper_arm_line_true,
+        marker=lp_upper_arm_marker_true,
+        name='Upper arm',
+        legendgroup='true_arm',
+        showlegend=False
+    ), row=1, col=2)
+    # Previous Positions
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='markers',
+        marker=dict(size=3, color='dodgerblue', opacity=0.5),
+        name='Previous positions',
+        legendgroup='true_trajectory',
+        showlegend=False
+    ), row=1, col=2)
+    # planned trajectory
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='markers',
+        marker=dict(size=3, color='orange', opacity=0.5),
+        name='Posterior position',
+        legendgroup='planned_trajectory',
+        showlegend=False
+    ), row=1, col=2)
+    # Current Position
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='markers',
+        marker=dict(size=6, color='dodgerblue'),
+        name='Current position',
+        legendgroup='true_trajectory',
+        showlegend=False
+    ), row=1, col=2)
+    # Target Circle
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='lines',
+        line=dict(color='black'),
+        fill='toself',
+        fillcolor='rgba(128, 128, 128, 0.2)',
+        name='Target',
+        legendgroup='target',
+        showlegend=False
+    ), row=1, col=2)
+    # Input positions
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='markers',
+        marker=dict(size=4, color='darkblue', opacity=0.5),
+        name='Input position',
+        legendgroup='input_position',
+        showlegend=False
+    ), row=1, col=2)
+    # Visual feedback
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='markers',
+        marker=dict(size=4, color='green', opacity=0.3),
+        name='Visual feedback',
+        legendgroup='visual_feedback',
+        showlegend=False
+    ), row=1, col=2)
+    # Body
+
+    if c.task_type == "patterson2017":
+        # Target out
+        target_out_x, target_out_y = create_circle(
+            results['p_target_out_x'].iloc[0],
+            results['p_target_out_y'].iloc[0],
+            results['r_target_out'].iloc[0],
+            num_points=72)
+        fig.add_trace(go.Scatter(
+            x=target_out_x,
+            y=target_out_y,
+            mode='lines',
+            line=dict(
+                color='rgba(128, 128, 128, 0.5)',  # Line color
+                width=1,                           # Line width
+                dash='dot'
+            ),
+            fill='toself',
+            fillcolor='rgba(128, 128, 128, 0.1)',
+            name='Target out',
+            # legendgroup='group1',
+            showlegend=False
+        ), row=1, col=1)
+        fig.add_trace(go.Scatter(
+            x=target_out_x,
+            y=target_out_y,
+            mode='lines',
+            line=dict(
+                color='rgba(128, 128, 128, 0.5)',  # Line color
+                width=1,                           # Line width
+                dash='dot'
+            ),
+            fill='toself',
+            fillcolor='rgba(128, 128, 128, 0.1)',
+            name='Target out',
+            # legendgroup='group1',
+            showlegend=False
+        ), row=1, col=2)
+        # Target home
+        target_home_x, target_home_y = create_circle(
+            results['p_target_home_x'].iloc[0],
+            results['p_target_home_y'].iloc[0],
+            results['r_target_home'].iloc[0],
+            num_points=72)
+        fig.add_trace(go.Scatter(
+            x=target_home_x,
+            y=target_home_y,
+            mode='lines',
+            line=dict(
+                color='rgba(128, 128, 128, 0.5)',  # Line color
+                width=1,                           # Line width
+                dash='dot'
+            ),
+            fill='toself',
+            fillcolor='rgba(128, 128, 128, 0.1)',
+            name='Target home',
+            # legendgroup='group1',
+            showlegend=False
+        ), row=1, col=1)
+        fig.add_trace(go.Scatter(
+            x=target_home_x,
+            y=target_home_y,
+            mode='lines',
+            line=dict(
+                color='rgba(128, 128, 128, 0.5)',  # Line color
+                width=1,                           # Line width
+                dash='dot'
+            ),
+            fill='toself',
+            fillcolor='rgba(128, 128, 128, 0.1)',
+            name='Target out',
+            # legendgroup='group1',
+            showlegend=False
+        ), row=1, col=2)
+        # Target final
+        target_final_x, target_final_y = create_circle(
+            results['p_target_final_x'].iloc[0],
+            results['p_target_final_y'].iloc[0],
+            results['r_target_out'].iloc[0],
+            num_points=72)
+        fig.add_trace(go.Scatter(
+            x=target_final_x,
+            y=target_final_y,
+            mode='lines',
+            line=dict(
+                color='rgba(128, 128, 128, 0.5)',  # Line color
+                width=1,                           # Line width
+                dash='dot'
+            ),
+            fill='toself',
+            fillcolor='rgba(128, 128, 128, 0.1)',
+            name='Target final',
+            # legendgroup='group1',
+            showlegend=False
+        ), row=1, col=1)
+        fig.add_trace(go.Scatter(
+            x=target_final_x,
+            y=target_final_y,
+            mode='lines',
+            line=dict(
+                color='rgba(128, 128, 128, 0.5)',  # Line color
+                width=1,                           # Line width
+                dash='dot'
+            ),
+            fill='toself',
+            fillcolor='rgba(128, 128, 128, 0.1)',
+            name='Target out',
+            # legendgroup='group1',
+            showlegend=False
+        ), row=1, col=2)
+        
+        
+
+    elif c.task_type == "circular_following":
+        outer_path_x, outer_path_y = create_circle(
+            results['circular_target_movement_c_x'].iloc[0],
+            results['circular_target_movement_c_y'].iloc[0],
+            results['circular_target_movement_r'].iloc[0] + results['r_target'].iloc[0],
+            num_points=72)
+
+        inner_path_x, inner_path_y = create_circle(
+            results['circular_target_movement_c_x'].iloc[0],
+            results['circular_target_movement_c_y'].iloc[0],
+            results['circular_target_movement_r'].iloc[0] - results['r_target'].iloc[0],
+            num_points=72)
+
+        fig.add_trace(go.Scatter(
+            x=outer_path_x,
+            y=outer_path_y,
+            mode='lines',
+            # line=dict(color='grey'),
+            line=dict(
+                color='rgba(128, 128, 128, 0.2)',  # Line color
+                width=2,                           # Line width
+                # Line style ('solid', 'dot', 'dash', 'longdash', 'dashdot', etc.)
+                dash='solid'
+            ),            fill='toself',
+            fillcolor='rgba(128, 128, 128, 0.)',
+            name='Target',
+            # legendgroup='group2',
+            showlegend=False
+        ), row=1, col=2)
+        fig.add_trace(go.Scatter(
+            x=inner_path_x,
+            y=inner_path_y,
+            mode='lines',
+            line=dict(
+                color='rgba(128, 128, 128, 0.2)',  # Line color
+                width=2,                           # Line width
+                # Line style ('solid', 'dot', 'dash', 'longdash', 'dashdot', etc.)
+                dash='solid'
+            ),
+            fill='toself',
+            fillcolor='rgba(128, 128, 128, 0.)',
+            name='Target',
+            # legendgroup='group2',
+            showlegend=False
+        ), row=1, col=2)
+        fig.add_trace(go.Scatter(
+            x=outer_path_x,
+            y=outer_path_y,
+            mode='lines',
+            line=dict(
+                color='rgba(128, 128, 128, 0.2)',  # Line color
+                width=2,                           # Line width
+                # Line style ('solid', 'dot', 'dash', 'longdash', 'dashdot', etc.)
+                dash='solid'
+            ),            fill='toself',
+            fillcolor='rgba(128, 128, 128, 0.)',
+            name='Target',
+            # legendgroup='group2',
+            showlegend=False
+        ), row=1, col=1)
+        fig.add_trace(go.Scatter(
+            x=inner_path_x,
+            y=inner_path_y,
+            mode='lines',
+            line=dict(
+                color='rgba(128, 128, 128, 0.2)',  # Line color
+                width=2,                           # Line width
+                # Line style ('solid', 'dot', 'dash', 'longdash', 'dashdot', etc.)
+                dash='solid'
+            ),
+            fill='toself',
+            fillcolor='rgba(128, 128, 128, 0.)',
+            name='Target',
+            # legendgroup='group2',
+            showlegend=False
+        ), row=1, col=1)
+
+    frames = []
+    i = -1
+
+    total_iterations = len(results)
+    # print(f"Total iterations: {total_iterations}")
+    runs = results['run'].unique()
+    frame_times = []
+    # print(f"Total runs: {n_runs}")
+    with tqdm(total=total_iterations, desc="Animation progress") as pbar:
+        for run in runs:
+            # print(f"Run: {run}")
+            trials = results[results['run'] == run]['trial'].unique()
+
+            for trial in trials:
+                n_steps_this_trial = len(
+                    results[(results['trial'] == trial) & (results['run'] == run)])
+                results_trial = results[(results['trial'] == trial) & (
+                    results['run'] == run)]
+                
+                # Pre-extract all sigma point data for the current trial
+                all_sigmas_x_for_trial = []
+                all_sigmas_y_for_trial = []
+                if c.plot_sigma_points:
+                    if 'sigmas_cartesian_transformed_0_x' in results_trial.columns: # Check if sigma data exists
+                        for sigma_idx in range(9): # Assuming 9 sigma points
+                            col_x_name = f'sigmas_cartesian_transformed_{sigma_idx}_x'
+                            col_y_name = f'sigmas_cartesian_transformed_{sigma_idx}_y'
+                            if col_x_name in results_trial.columns and col_y_name in results_trial.columns:
+                                all_sigmas_x_for_trial.append(results_trial[col_x_name].tolist())
+                                all_sigmas_y_for_trial.append(results_trial[col_y_name].tolist())
+                            else:
+                                # Append list of NaNs if a column is missing, to maintain structure
+                                all_sigmas_x_for_trial.append([np.nan] * n_steps_this_trial)
+                                all_sigmas_y_for_trial.append([np.nan] * n_steps_this_trial)
+                    else:
+                        # If no sigma data at all, create empty structures or fill with NaNs
+                        for _ in range(9):
+                            all_sigmas_x_for_trial.append([np.nan] * n_steps_this_trial)
+                            all_sigmas_y_for_trial.append([np.nan] * n_steps_this_trial)
+
+                # print(results['step'][results['trial'] == trial].steps)
+                for trial_step in range(n_steps_this_trial):
+                    time = results_trial['time_run'].iloc[trial_step] if c.task_type == 'bouncing' else results_trial['time'].iloc[trial_step]
+                    label = f"Trial {trial} time {time:.3f}"
+                    frame_times.append(label)
+                    # print(f"Step: {trial_step}")
+                    i += 1
+                    # Subplot 1 data
+                    circle_x1, circle_y1 = create_circle(
+                        results_trial['target_x'].iloc[trial_step],
+                        results_trial['target_y'].iloc[trial_step],
+                        results_trial['r_target'].iloc[trial_step])
+                    # circle_x2, circle_y2 = create_circle(
+                    #     results_trial['vis_target_x'].iloc[trial_step],
+                    #     results_trial['vis_target_y'].iloc[trial_step],
+                    #     results_trial['r_target'].iloc[trial_step])
+
+
+                    current_endpoints = endpoints[
+                        # (endpoints['run'] == run) &
+                        # (endpoints['trial'] == trial) &
+                        (endpoints['row_index'] <= results_trial.index[trial_step])
+                    ]
+
+                    # Calculate Posterior Hand Uncertainty Ellipse for Subplot 2
+                    ellipse_x_coords, ellipse_y_coords = np.array([]), np.array([]) # Default to empty
+                    
+                    hand_posterior_mu_x = results_trial['posterior_hand_x'].iloc[trial_step]
+                    hand_posterior_mu_y = results_trial['posterior_hand_y'].iloc[trial_step]
+                    hand_posterior_mu = np.array([hand_posterior_mu_x, hand_posterior_mu_y])
+
+                    P_cart_est_col_name = 'P_est_cartesian_ukf'
+                    if P_cart_est_col_name in results_trial.columns:
+                        P_cart_est_matrix_full = results_trial[P_cart_est_col_name].iloc[trial_step]
+                        
+                        # Check if it's a valid 6x6 numpy array
+                        if isinstance(P_cart_est_matrix_full, np.ndarray) and P_cart_est_matrix_full.shape == (6, 6):
+                            # Extract the 2x2 submatrix for hand position (x, y)
+                            covariance_matrix_hand = P_cart_est_matrix_full[0:2, 0:2]
+                            
+                            if not np.isnan(hand_posterior_mu).any() and not np.isnan(covariance_matrix_hand).any():
+                                ellipse_x_coords, ellipse_y_coords = calculate_ellipse_points(
+                                    hand_posterior_mu,
+                                    covariance_matrix_hand,
+                                    n_std=1.96 # For 95% credible interval
+                                )
+                            else: # Optional: log if not a 6x6 ndarray
+                                print(f"Warning: {P_cart_est_col_name} is not a 6x6 ndarray at step {trial_step}. Shape: {getattr(P_cart_est_matrix_full, 'shape', 'N/A')}")
+                        else: # Optional: log if column not found
+                            print(f"Warning: Column {P_cart_est_col_name} not found at step {trial_step} for ellipse.")
+
+                    # Cartesian sigma points - access pre-extracted data
+                    if c.plot_sigma_points:
+                        x_cart_sigmas = [all_sigmas_x_for_trial[j][trial_step] for j in range(len(all_sigmas_x_for_trial))]
+                        y_cart_sigmas = [all_sigmas_y_for_trial[j][trial_step] for j in range(len(all_sigmas_y_for_trial))]
+                    else:
+                        x_cart_sigmas = []
+                        y_cart_sigmas = []
+
+                    # Always show all visual feedback points collected so far in this trial,
+                    # regardless of whether the current step has visual feedback available.
+                    vis_mask = results_trial['visual_feedback'].iloc[:trial_step + 1]
+                    x_vis_feedback = results_trial['vis_hand_x'].iloc[:trial_step + 1][vis_mask]
+                    y_vis_feedback = results_trial['vis_hand_y'].iloc[:trial_step + 1][vis_mask]
+                    if len(x_vis_feedback) == 0:
+                        x_vis_feedback = [np.nan]
+                        y_vis_feedback = [np.nan]
+
+                    frames.append(go.Frame(
+                        data=[
+                            # Shoulder both subplots
+                            go.Scatter(
+                                x=[results['true_shoulder_x'].iloc[0]],
+                                y=[results['true_shoulder_y'].iloc[0]],
+                            ),
+                            go.Scatter(
+                                x=[results['true_shoulder_x'].iloc[0]],
+                                y=[results['true_shoulder_y'].iloc[0]],
+                            ),
+                            
+                            # Subplot 1 Traces
+                            # Lower arm
+                            go.Scatter(
+                                x=[results_trial['true_elbow_x'].iloc[trial_step],
+                                   results_trial['true_hand_x'].iloc[trial_step]],
+                                y=[results_trial['true_elbow_y'].iloc[trial_step],
+                                   results_trial['true_hand_y'].iloc[trial_step]],
+                            ),
+                            # Upper arm
+                            go.Scatter(
+                                x=[results_trial['true_shoulder_x'].iloc[trial_step],
+                                   results_trial['true_elbow_x'].iloc[trial_step]],
+                                y=[results_trial['true_shoulder_y'].iloc[trial_step],
+                                   results_trial['true_elbow_y'].iloc[trial_step]],
+                            ),
+                            # Hand previous positions
+                            go.Scatter(
+                                x=results_trial['true_hand_x'].iloc[:trial_step],
+                                y=results_trial['true_hand_y'].iloc[:trial_step],
+                            ),
+                            # Posterior position
+                            go.Scatter(
+                                x=results_trial['posterior_hand_x'].iloc[:trial_step],
+                                y=results_trial['posterior_hand_y'].iloc[:trial_step],
+                            ),
+                            
+                            # Hand current position
+                            go.Scatter(
+                                x=[results_trial['true_hand_x'].iloc[trial_step]],
+                                y=[results_trial['true_hand_y'].iloc[trial_step]],
+                            ),
+                            # Target circle
+                            go.Scatter(
+                                x=circle_x1,
+                                y=circle_y1,
+                            ),
+                            go.Scatter(
+                                x=current_endpoints['true_hand_x'],
+                                y=current_endpoints['true_hand_y'],
+                            ),
+                            # Visual feedback
+                            go.Scatter(
+                                x=x_vis_feedback,
+                                y=y_vis_feedback,
+                            ),
+                            # Subplot 2 Traces (zoomed-in copy of Subplot 1)
+                            # Lower arm
+                            go.Scatter(
+                                x=[results_trial['true_elbow_x'].iloc[trial_step],
+                                   results_trial['true_hand_x'].iloc[trial_step]],
+                                y=[results_trial['true_elbow_y'].iloc[trial_step],
+                                   results_trial['true_hand_y'].iloc[trial_step]],
+                            ),
+                            # Upper arm
+                            go.Scatter(
+                                x=[results_trial['true_shoulder_x'].iloc[trial_step],
+                                   results_trial['true_elbow_x'].iloc[trial_step]],
+                                y=[results_trial['true_shoulder_y'].iloc[trial_step],
+                                   results_trial['true_elbow_y'].iloc[trial_step]],
+                            ),
+                            # Hand previous positions
+                            go.Scatter(
+                                x=results_trial['true_hand_x'].iloc[:trial_step],
+                                y=results_trial['true_hand_y'].iloc[:trial_step],
+                            ),
+                            # planned trajectory
+                            go.Scatter(
+                                x=results_trial['p_planned_trajectory_x'].iloc[:trial_step],
+                                y=results_trial['p_planned_trajectory_y'].iloc[:trial_step],
+                            ),
+                            # Hand current position
+                            go.Scatter(
+                                x=[results_trial['true_hand_x'].iloc[trial_step]],
+                                y=[results_trial['true_hand_y'].iloc[trial_step]],
+                            ),
+                            # Target circle
+                            go.Scatter(
+                                x=circle_x1,
+                                y=circle_y1,
+                            ),
+                            # Endpoints
+                            go.Scatter(
+                                x=current_endpoints['true_hand_x'],
+                                y=current_endpoints['true_hand_y'],
+                            ),
+                            # Visual feedback
+                            go.Scatter(
+                                x=x_vis_feedback,
+                                y=y_vis_feedback,
+                            ),
+
+                        ],
+                        name=str(i)
+                    ))
+                    pbar.update(1)
+
+    # Assign frames to the figure
+    fig.frames = frames
+
+    print(f"Total frames: {len(frames)}")
+
+    ### Create Slider Steps ###
+    slider_steps = []
+    # for i in tqdm(range(len(frames)), desc="Combining frames"):
+    for i in range(len(frames)):
+        slider_step = dict(
+            method='animate',
+            label=frame_times[i],
+            args=[
+                [str(i)],
+                dict(
+                    mode='immediate',
+                    frame=dict(duration=0, redraw=False),
+                    transition=dict(duration=0)
+                )
+            ],
+        )
+        slider_steps.append(slider_step)
+
+    # Create the slider
+    sliders = [dict(
+        active=0,
+        currentvalue={'prefix': 'Time: '},
+        pad={'t': 50},
+        steps=slider_steps
+    )]
+
+    ### Set Axis Limits and Update Axes for Each Subplot ###
+
+    # Margin for both subplots
+    margin = .1
+
+    # Subplot 1 Axis Ranges
+    x_min = -.5
+    x_max = .5
+    y_min = -.3
+    y_max = .7
+
+    # Update axes for Subplot 1
+    fig.update_xaxes(
+        range=[x_min, x_max],
+        title_text='X Position',
+        scaleanchor='y',
+        scaleratio=1,
+        constrain='domain',
+        row=1, col=1
+    )
+    fig.update_yaxes(
+        range=[y_min, y_max],
+        title_text='Y Position',
+        constrain='domain',
+        row=1, col=1
+    )
+
+    # Update axes for Subplot 2 (zoomed-in, tall/narrow view of Subplot 1)
+    zoom_x_min = -0.05
+    zoom_x_max = 0.05
+    zoom_y_min = -0.05
+    zoom_y_max = 0.25
+    fig.update_xaxes(
+        range=[zoom_x_min, zoom_x_max],
+        title_text='X Position',
+        scaleanchor='y2',
+        scaleratio=1,
+        constrain='domain',
+        row=1, col=2
+    )
+    fig.update_yaxes(
+        range=[zoom_y_min, zoom_y_max],
+        title_text='',
+        constrain='domain',
+        row=1, col=2
+    )
+
+    ### Update Figure Layout ###
+    fig.update_layout(
+        width=800,
+        height=600,
+        autosize=False,
+        updatemenus=[
+            {
+                'type': 'buttons',
+                'buttons': [
+                    {
+                        'label': 'Play',
+                        'method': 'animate',
+                        'args': [None, {
+                            'frame': {'duration': ((1000*c.dt)*frame_decimation)/annimation_speedup, 'redraw': False},
+                            'transition': {'duration': ((1000*c.dt)*frame_decimation)/annimation_speedup, 'easing': 'linear'},
+                            'fromcurrent': True,
+                        }]
+                    },
+                    {
+                        'label': 'Pause',
+                        'method': 'animate',
+                        'args': [[None], {
+                            'frame': {'duration': 0, 'redraw': False},
+                            'mode': 'immediate',
+                            'transition': {'duration': 0}
+                        }]
+                    }
+                ],
+                'showactive': False,
+                'y': -0.1,
+                'x': -0.01
+            }
+        ],
+        sliders=sliders,
+        showlegend=True,
+    )
+
+    # Display the animation
+    if show_fig:
+        fig.show(config={'responsive': False})
+
+    file_name = 'outputs/plotly_animation.html' if output_filename == None else output_filename + '.html'
+    
+    # Ensure output directory exists
+    output_dir = os.path.dirname(file_name)
+    if output_dir and not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+        print(f"Created output directory: {output_dir}")
+
+    fig.write_html(file_name)
+    print(
+        f'Plotly animated plot created with frame_decimation set to {frame_decimation}\n{len(results)} of {org_len} steps animated\nAnimation saved to: {file_name}')
+
+
+def plotly_animation3(results, show_fig=False, frame_decimation=1, annimation_speedup=.5, output_filename=None, extra_text=None, file_type = None):
+    org_len = len(results)
+    if org_len == 0:
+        print("Warning: results DataFrame is empty. Cannot generate plotly_animation.")
+        return
+    substract_len = org_len % frame_decimation
+    results.drop(results.index[(org_len-substract_len):], inplace=True)
+    results = results.iloc[::frame_decimation].copy()
+    if results.empty:
+        print(f"Warning: results DataFrame is empty after decimation with factor {frame_decimation}. Cannot generate plotly_animation.")
+        return
+    results['row_index'] = results.index
+    endpoints = results.groupby(['run', 'trial']).tail(1)
+    if c.elbow_down:
+        shoulder_marker = {'size': 20, 'color': 'peru'}
+        upper_arm_line = {'width': 16, 'color': 'darkorange'}
+        lower_arm_line = {'width': 12, 'color': 'orange'}
+        upper_arm_marker = {'size': 16, 'color': 'darkorange'}
+        lower_arm_marker = {'size': 12, 'color': 'orange'}
+    else:
+        shoulder_marker = {'size': 15, 'color': 'darkorange'}
+        upper_arm_line = {'width': 15, 'color': 'darkorange'}
+        lower_arm_line = {'width': 15, 'color': 'darkorange'}
+        upper_arm_marker = {'size': 15, 'color': 'darkorange'}
+        lower_arm_marker = {'size': 15, 'color': 'darkorange'}
+
+    # print(results['visual_feedback'])
+
+    lp_upper_arm_line_true = {'width': 15, 'color': 'steelblue'}
+    lp_lower_arm_line_true = {'width': 15, 'color': 'steelblue'}
+    lp_upper_arm_marker_true = {'size': 15, 'color': 'steelblue'}
+    lp_lower_arm_marker_true = {'size': 15, 'color': 'steelblue'}
+    rp_upper_arm_line_true = {'width': 5, 'color': 'steelblue'}
+    rp_lower_arm_line_true = {'width': 5, 'color': 'steelblue'}
+    rp_upper_arm_marker_true = {'size': 5, 'color': 'steelblue'}
+    rp_lower_arm_marker_true = {'size': 5, 'color': 'steelblue'}
+
+
+    fig = make_subplots(
+        rows=1,
+        cols=2,
+        subplot_titles=('', ''),
+        horizontal_spacing=0.05,
+        column_widths=[0.50,0.50]
+    )
+    # shoulder both subplots
+    fig.add_trace(go.Scatter(
+        x=[results['true_shoulder_x'].iloc[0]],
+        y=[results['true_shoulder_y'].iloc[0]],
+        mode='markers',
+        marker=lp_upper_arm_marker_true,
+        name='Shoulder',
+        legendgroup='true_arm',
+        showlegend=False
+    ), row=1, col=1)
+    fig.add_trace(go.Scatter(
+        x=[results['true_shoulder_x'].iloc[0]],
+        y=[results['true_shoulder_y'].iloc[0]],
+        mode='markers',
+        marker=lp_upper_arm_marker_true,
+        name='Shoulder',
+        legendgroup='true_arm',
+        showlegend=False
+    ), row=1, col=2)
+
+    ### Add initial traces to Subplot 1 ###
+
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='lines+markers',
+        line=lp_lower_arm_line_true,
+        marker=lp_lower_arm_marker_true,
+        name='Lower arm',
+        legendgroup='true_arm',
+        showlegend=False
+    ), row=1, col=1)
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='lines+markers',
+        line=lp_upper_arm_line_true,
+        marker=lp_upper_arm_marker_true,
+        name='Upper arm',
+        legendgroup='true_arm',
+        showlegend=False
+    ), row=1, col=1)
+    # Previous Positions
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='markers',
+        marker=dict(size=3, color='dodgerblue', opacity=0.5),
+        name='Previous positions',
+        legendgroup='true_trajectory',
+        showlegend=True
+    ), row=1, col=1)
+    # planned trajectory
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='markers',
+        marker=dict(size=3, color='orange', opacity=0.5),
+        name='Posterior position',
+        legendgroup='planned_trajectory',
+        showlegend=True
+    ), row=1, col=1)
+    # Current Position
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='markers',
+        marker=dict(size=6, color='dodgerblue'),
+        name='Current position',
+        legendgroup='true_trajectory',
+        showlegend=True
+    ), row=1, col=1)
+
+    # Target Circle
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='lines',
+        line=dict(color='black'),
+        fill='toself',
+        fillcolor='rgba(128, 128, 128, 0.2)',
+        name='Target',
+        legendgroup='target',
+        showlegend=True
+    ), row=1, col=1)
+
+    # Input positions
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='markers',
+        marker=dict(size=4, color='darkblue', opacity=0.5),
+        name='Input position',
+        legendgroup='input_position',
+        showlegend=True
+    ), row=1, col=1)
+    # Visual feedback
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='markers',
+        marker=dict(size=4, color='green', opacity=0.3),
+        name='Visual feedback',
+        legendgroup='visual_feedback',
+        showlegend=True
+    ), row=1, col=1)
+
+    ### Add initial traces to Subplot 2 (zoomed-in copy of Subplot 1) ###
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='lines+markers',
+        line=lp_lower_arm_line_true,
+        marker=lp_lower_arm_marker_true,
+        name='Lower arm',
+        legendgroup='true_arm',
+        showlegend=False
+    ), row=1, col=2)
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='lines+markers',
+        line=lp_upper_arm_line_true,
+        marker=lp_upper_arm_marker_true,
+        name='Upper arm',
+        legendgroup='true_arm',
+        showlegend=False
+    ), row=1, col=2)
+    # Previous Positions
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='markers',
+        marker=dict(size=3, color='dodgerblue', opacity=0.5),
+        name='Previous positions',
+        legendgroup='true_trajectory',
+        showlegend=False
+    ), row=1, col=2)
+    # planned trajectory
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='markers',
+        marker=dict(size=3, color='orange', opacity=0.5),
+        name='Posterior position',
+        legendgroup='planned_trajectory',
+        showlegend=False
+    ), row=1, col=2)
+    # Current Position
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='markers',
+        marker=dict(size=6, color='dodgerblue'),
+        name='Current position',
+        legendgroup='true_trajectory',
+        showlegend=False
+    ), row=1, col=2)
+    # Target Circle
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='lines',
+        line=dict(color='black'),
+        fill='toself',
+        fillcolor='rgba(128, 128, 128, 0.2)',
+        name='Target',
+        legendgroup='target',
+        showlegend=False
+    ), row=1, col=2)
+    # Input positions
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='markers',
+        marker=dict(size=4, color='darkblue', opacity=0.5),
+        name='Input position',
+        legendgroup='input_position',
+        showlegend=False
+    ), row=1, col=2)
+    # Visual feedback
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='markers',
+        marker=dict(size=4, color='green', opacity=0.3),
+        name='Visual feedback',
+        legendgroup='visual_feedback',
+        showlegend=False
+    ), row=1, col=2)
+    # Body
+
+    if c.task_type == "patterson2017":
+        # Target out
+        target_out_x, target_out_y = create_circle(
+            results['p_target_out_x'].iloc[0],
+            results['p_target_out_y'].iloc[0],
+            results['r_target_out'].iloc[0],
+            num_points=72)
+        fig.add_trace(go.Scatter(
+            x=target_out_x,
+            y=target_out_y,
+            mode='lines',
+            line=dict(
+                color='rgba(128, 128, 128, 0.5)',  # Line color
+                width=1,                           # Line width
+                dash='dot'
+            ),
+            fill='toself',
+            fillcolor='rgba(128, 128, 128, 0.1)',
+            name='Target out',
+            # legendgroup='group1',
+            showlegend=False
+        ), row=1, col=1)
+        fig.add_trace(go.Scatter(
+            x=target_out_x,
+            y=target_out_y,
+            mode='lines',
+            line=dict(
+                color='rgba(128, 128, 128, 0.5)',  # Line color
+                width=1,                           # Line width
+                dash='dot'
+            ),
+            fill='toself',
+            fillcolor='rgba(128, 128, 128, 0.1)',
+            name='Target out',
+            # legendgroup='group1',
+            showlegend=False
+        ), row=1, col=2)
+        # Target home
+        target_home_x, target_home_y = create_circle(
+            results['p_target_home_x'].iloc[0],
+            results['p_target_home_y'].iloc[0],
+            results['r_target_home'].iloc[0],
+            num_points=72)
+        fig.add_trace(go.Scatter(
+            x=target_home_x,
+            y=target_home_y,
+            mode='lines',
+            line=dict(
+                color='rgba(128, 128, 128, 0.5)',  # Line color
+                width=1,                           # Line width
+                dash='dot'
+            ),
+            fill='toself',
+            fillcolor='rgba(128, 128, 128, 0.1)',
+            name='Target home',
+            # legendgroup='group1',
+            showlegend=False
+        ), row=1, col=1)
+        fig.add_trace(go.Scatter(
+            x=target_home_x,
+            y=target_home_y,
+            mode='lines',
+            line=dict(
+                color='rgba(128, 128, 128, 0.5)',  # Line color
+                width=1,                           # Line width
+                dash='dot'
+            ),
+            fill='toself',
+            fillcolor='rgba(128, 128, 128, 0.1)',
+            name='Target out',
+            # legendgroup='group1',
+            showlegend=False
+        ), row=1, col=2)
+        # Target final
+        target_final_x, target_final_y = create_circle(
+            results['p_target_final_x'].iloc[0],
+            results['p_target_final_y'].iloc[0],
+            results['r_target_out'].iloc[0],
+            num_points=72)
+        fig.add_trace(go.Scatter(
+            x=target_final_x,
+            y=target_final_y,
+            mode='lines',
+            line=dict(
+                color='rgba(128, 128, 128, 0.5)',  # Line color
+                width=1,                           # Line width
+                dash='dot'
+            ),
+            fill='toself',
+            fillcolor='rgba(128, 128, 128, 0.1)',
+            name='Target final',
+            # legendgroup='group1',
+            showlegend=False
+        ), row=1, col=1)
+        fig.add_trace(go.Scatter(
+            x=target_final_x,
+            y=target_final_y,
+            mode='lines',
+            line=dict(
+                color='rgba(128, 128, 128, 0.5)',  # Line color
+                width=1,                           # Line width
+                dash='dot'
+            ),
+            fill='toself',
+            fillcolor='rgba(128, 128, 128, 0.1)',
+            name='Target out',
+            # legendgroup='group1',
+            showlegend=False
+        ), row=1, col=2)
+        
+        
+
+    elif c.task_type == "circular_following":
+        outer_path_x, outer_path_y = create_circle(
+            results['circular_target_movement_c_x'].iloc[0],
+            results['circular_target_movement_c_y'].iloc[0],
+            results['circular_target_movement_r'].iloc[0] + results['r_target'].iloc[0],
+            num_points=72)
+
+        inner_path_x, inner_path_y = create_circle(
+            results['circular_target_movement_c_x'].iloc[0],
+            results['circular_target_movement_c_y'].iloc[0],
+            results['circular_target_movement_r'].iloc[0] - results['r_target'].iloc[0],
+            num_points=72)
+
+        fig.add_trace(go.Scatter(
+            x=outer_path_x,
+            y=outer_path_y,
+            mode='lines',
+            # line=dict(color='grey'),
+            line=dict(
+                color='rgba(128, 128, 128, 0.2)',  # Line color
+                width=2,                           # Line width
+                # Line style ('solid', 'dot', 'dash', 'longdash', 'dashdot', etc.)
+                dash='solid'
+            ),            fill='toself',
+            fillcolor='rgba(128, 128, 128, 0.)',
+            name='Target',
+            # legendgroup='group2',
+            showlegend=False
+        ), row=1, col=2)
+        fig.add_trace(go.Scatter(
+            x=inner_path_x,
+            y=inner_path_y,
+            mode='lines',
+            line=dict(
+                color='rgba(128, 128, 128, 0.2)',  # Line color
+                width=2,                           # Line width
+                # Line style ('solid', 'dot', 'dash', 'longdash', 'dashdot', etc.)
+                dash='solid'
+            ),
+            fill='toself',
+            fillcolor='rgba(128, 128, 128, 0.)',
+            name='Target',
+            # legendgroup='group2',
+            showlegend=False
+        ), row=1, col=2)
+        fig.add_trace(go.Scatter(
+            x=outer_path_x,
+            y=outer_path_y,
+            mode='lines',
+            line=dict(
+                color='rgba(128, 128, 128, 0.2)',  # Line color
+                width=2,                           # Line width
+                # Line style ('solid', 'dot', 'dash', 'longdash', 'dashdot', etc.)
+                dash='solid'
+            ),            fill='toself',
+            fillcolor='rgba(128, 128, 128, 0.)',
+            name='Target',
+            # legendgroup='group2',
+            showlegend=False
+        ), row=1, col=1)
+        fig.add_trace(go.Scatter(
+            x=inner_path_x,
+            y=inner_path_y,
+            mode='lines',
+            line=dict(
+                color='rgba(128, 128, 128, 0.2)',  # Line color
+                width=2,                           # Line width
+                # Line style ('solid', 'dot', 'dash', 'longdash', 'dashdot', etc.)
+                dash='solid'
+            ),
+            fill='toself',
+            fillcolor='rgba(128, 128, 128, 0.)',
+            name='Target',
+            # legendgroup='group2',
+            showlegend=False
+        ), row=1, col=1)
+
+    frames = []
+    i = -1
+
+    total_iterations = len(results)
+    # print(f"Total iterations: {total_iterations}")
+    runs = results['run'].unique()
+    frame_times = []
+    # print(f"Total runs: {n_runs}")
+    with tqdm(total=total_iterations, desc="Animation progress") as pbar:
+        for run in runs:
+            # print(f"Run: {run}")
+            trials = results[results['run'] == run]['trial'].unique()
+
+            for trial in trials:
+                n_steps_this_trial = len(
+                    results[(results['trial'] == trial) & (results['run'] == run)])
+                results_trial = results[(results['trial'] == trial) & (
+                    results['run'] == run)]
+                
+                # Pre-extract all sigma point data for the current trial
+                all_sigmas_x_for_trial = []
+                all_sigmas_y_for_trial = []
+                if c.plot_sigma_points:
+                    if 'sigmas_cartesian_transformed_0_x' in results_trial.columns: # Check if sigma data exists
+                        for sigma_idx in range(9): # Assuming 9 sigma points
+                            col_x_name = f'sigmas_cartesian_transformed_{sigma_idx}_x'
+                            col_y_name = f'sigmas_cartesian_transformed_{sigma_idx}_y'
+                            if col_x_name in results_trial.columns and col_y_name in results_trial.columns:
+                                all_sigmas_x_for_trial.append(results_trial[col_x_name].tolist())
+                                all_sigmas_y_for_trial.append(results_trial[col_y_name].tolist())
+                            else:
+                                # Append list of NaNs if a column is missing, to maintain structure
+                                all_sigmas_x_for_trial.append([np.nan] * n_steps_this_trial)
+                                all_sigmas_y_for_trial.append([np.nan] * n_steps_this_trial)
+                    else:
+                        # If no sigma data at all, create empty structures or fill with NaNs
+                        for _ in range(9):
+                            all_sigmas_x_for_trial.append([np.nan] * n_steps_this_trial)
+                            all_sigmas_y_for_trial.append([np.nan] * n_steps_this_trial)
+
+                # print(results['step'][results['trial'] == trial].steps)
+                for trial_step in range(n_steps_this_trial):
+                    time = results_trial['time_run'].iloc[trial_step] if c.task_type == 'bouncing' else results_trial['time'].iloc[trial_step]
+                    label = f"Trial {trial} time {time:.3f}"
+                    frame_times.append(label)
+                    # print(f"Step: {trial_step}")
+                    i += 1
+                    # Subplot 1 data
+                    circle_x1, circle_y1 = create_circle(
+                        results_trial['target_x'].iloc[trial_step],
+                        results_trial['target_y'].iloc[trial_step],
+                        results_trial['r_target'].iloc[trial_step])
+                    # circle_x2, circle_y2 = create_circle(
+                    #     results_trial['vis_target_x'].iloc[trial_step],
+                    #     results_trial['vis_target_y'].iloc[trial_step],
+                    #     results_trial['r_target'].iloc[trial_step])
+
+
+                    current_endpoints = endpoints[
+                        # (endpoints['run'] == run) &
+                        # (endpoints['trial'] == trial) &
+                        (endpoints['row_index'] <= results_trial.index[trial_step])
+                    ]
+
+                    # Calculate Posterior Hand Uncertainty Ellipse for Subplot 2
+                    ellipse_x_coords, ellipse_y_coords = np.array([]), np.array([]) # Default to empty
+                    
+                    hand_posterior_mu_x = results_trial['posterior_hand_x'].iloc[trial_step]
+                    hand_posterior_mu_y = results_trial['posterior_hand_y'].iloc[trial_step]
+                    hand_posterior_mu = np.array([hand_posterior_mu_x, hand_posterior_mu_y])
+
+                    P_cart_est_col_name = 'P_est_cartesian_ukf'
+                    if P_cart_est_col_name in results_trial.columns:
+                        P_cart_est_matrix_full = results_trial[P_cart_est_col_name].iloc[trial_step]
+                        
+                        # Check if it's a valid 6x6 numpy array
+                        if isinstance(P_cart_est_matrix_full, np.ndarray) and P_cart_est_matrix_full.shape == (6, 6):
+                            # Extract the 2x2 submatrix for hand position (x, y)
+                            covariance_matrix_hand = P_cart_est_matrix_full[0:2, 0:2]
+                            
+                            if not np.isnan(hand_posterior_mu).any() and not np.isnan(covariance_matrix_hand).any():
+                                ellipse_x_coords, ellipse_y_coords = calculate_ellipse_points(
+                                    hand_posterior_mu,
+                                    covariance_matrix_hand,
+                                    n_std=1.96 # For 95% credible interval
+                                )
+                            else: # Optional: log if not a 6x6 ndarray
+                                print(f"Warning: {P_cart_est_col_name} is not a 6x6 ndarray at step {trial_step}. Shape: {getattr(P_cart_est_matrix_full, 'shape', 'N/A')}")
+                        else: # Optional: log if column not found
+                            print(f"Warning: Column {P_cart_est_col_name} not found at step {trial_step} for ellipse.")
+
+                    # Cartesian sigma points - access pre-extracted data
+                    if c.plot_sigma_points:
+                        x_cart_sigmas = [all_sigmas_x_for_trial[j][trial_step] for j in range(len(all_sigmas_x_for_trial))]
+                        y_cart_sigmas = [all_sigmas_y_for_trial[j][trial_step] for j in range(len(all_sigmas_y_for_trial))]
+                    else:
+                        x_cart_sigmas = []
+                        y_cart_sigmas = []
+
+                    # Show only the visual feedback points for steps where
+                    # `visual_feedback` is True (and the sampled position is valid).
+                    # Convert to a numpy bool array first, so that boolean masking
+                    # works regardless of the source column dtype (bool / object / 0-1 numeric),
+                    # otherwise pandas can silently fall back to label-based indexing and
+                    # render visual feedback on steps where it should be hidden.
+                    vis_mask = (
+                        results_trial['visual_feedback']
+                        .iloc[:trial_step + 1]
+                        .to_numpy()
+                        .astype(bool)
+                    )
+                    vis_hand_x_slice = results_trial['vis_hand_x'].iloc[:trial_step + 1].to_numpy()
+                    vis_hand_y_slice = results_trial['vis_hand_y'].iloc[:trial_step + 1].to_numpy()
+                    valid_vis = (
+                        vis_mask
+                        & ~pd.isna(vis_hand_x_slice)
+                        & ~pd.isna(vis_hand_y_slice)
+                    )
+                    x_vis_feedback = vis_hand_x_slice[valid_vis]
+                    y_vis_feedback = vis_hand_y_slice[valid_vis]
+                    if len(x_vis_feedback) == 0:
+                        x_vis_feedback = [np.nan]
+                        y_vis_feedback = [np.nan]
+
+                    frames.append(go.Frame(
+                        data=[
+                            # Shoulder both subplots
+                            go.Scatter(
+                                x=[results['true_shoulder_x'].iloc[0]],
+                                y=[results['true_shoulder_y'].iloc[0]],
+                            ),
+                            go.Scatter(
+                                x=[results['true_shoulder_x'].iloc[0]],
+                                y=[results['true_shoulder_y'].iloc[0]],
+                            ),
+                            
+                            # Subplot 1 Traces
+                            # Lower arm
+                            go.Scatter(
+                                x=[results_trial['true_elbow_x'].iloc[trial_step],
+                                   results_trial['true_hand_x'].iloc[trial_step]],
+                                y=[results_trial['true_elbow_y'].iloc[trial_step],
+                                   results_trial['true_hand_y'].iloc[trial_step]],
+                            ),
+                            # Upper arm
+                            go.Scatter(
+                                x=[results_trial['true_shoulder_x'].iloc[trial_step],
+                                   results_trial['true_elbow_x'].iloc[trial_step]],
+                                y=[results_trial['true_shoulder_y'].iloc[trial_step],
+                                   results_trial['true_elbow_y'].iloc[trial_step]],
+                            ),
+                            # Hand previous positions
+                            go.Scatter(
+                                x=results_trial['true_hand_x'].iloc[:trial_step],
+                                y=results_trial['true_hand_y'].iloc[:trial_step],
+                            ),
+                            # Posterior position
+                            go.Scatter(
+                                x=results_trial['posterior_hand_x'].iloc[:trial_step],
+                                y=results_trial['posterior_hand_y'].iloc[:trial_step],
+                            ),
+                            
+                            # Hand current position
+                            go.Scatter(
+                                x=[results_trial['true_hand_x'].iloc[trial_step]],
+                                y=[results_trial['true_hand_y'].iloc[trial_step]],
+                            ),
+                            # Target circle
+                            go.Scatter(
+                                x=circle_x1,
+                                y=circle_y1,
+                            ),
+                            go.Scatter(
+                                x=current_endpoints['true_hand_x'],
+                                y=current_endpoints['true_hand_y'],
+                            ),
+                            # Visual feedback
+                            go.Scatter(
+                                x=x_vis_feedback,
+                                y=y_vis_feedback,
+                            ),
+                            # Subplot 2 Traces (zoomed-in copy of Subplot 1)
+                            # Lower arm
+                            go.Scatter(
+                                x=[results_trial['true_elbow_x'].iloc[trial_step],
+                                   results_trial['true_hand_x'].iloc[trial_step]],
+                                y=[results_trial['true_elbow_y'].iloc[trial_step],
+                                   results_trial['true_hand_y'].iloc[trial_step]],
+                            ),
+                            # Upper arm
+                            go.Scatter(
+                                x=[results_trial['true_shoulder_x'].iloc[trial_step],
+                                   results_trial['true_elbow_x'].iloc[trial_step]],
+                                y=[results_trial['true_shoulder_y'].iloc[trial_step],
+                                   results_trial['true_elbow_y'].iloc[trial_step]],
+                            ),
+                            # Hand previous positions
+                            go.Scatter(
+                                x=results_trial['true_hand_x'].iloc[:trial_step],
+                                y=results_trial['true_hand_y'].iloc[:trial_step],
+                            ),
+                            # planned trajectory
+                            go.Scatter(
+                                x=results_trial['p_planned_trajectory_x'].iloc[:trial_step],
+                                y=results_trial['p_planned_trajectory_y'].iloc[:trial_step],
+                            ),
+                            # Hand current position
+                            go.Scatter(
+                                x=[results_trial['true_hand_x'].iloc[trial_step]],
+                                y=[results_trial['true_hand_y'].iloc[trial_step]],
+                            ),
+                            # Target circle
+                            go.Scatter(
+                                x=circle_x1,
+                                y=circle_y1,
+                            ),
+                            # Endpoints
+                            go.Scatter(
+                                x=current_endpoints['true_hand_x'],
+                                y=current_endpoints['true_hand_y'],
+                            ),
+                            # Visual feedback
+                            go.Scatter(
+                                x=x_vis_feedback,
+                                y=y_vis_feedback,
+                            ),
+
+                        ],
+                        name=str(i)
+                    ))
+                    pbar.update(1)
+
+    # Assign frames to the figure
+    fig.frames = frames
+
+    print(f"Total frames: {len(frames)}")
+
+    ### Create Slider Steps ###
+    slider_steps = []
+    # for i in tqdm(range(len(frames)), desc="Combining frames"):
+    for i in range(len(frames)):
+        slider_step = dict(
+            method='animate',
+            label=frame_times[i],
+            args=[
+                [str(i)],
+                dict(
+                    mode='immediate',
+                    frame=dict(duration=0, redraw=False),
+                    transition=dict(duration=0)
+                )
+            ],
+        )
+        slider_steps.append(slider_step)
+
+    # Create the slider
+    sliders = [dict(
+        active=0,
+        currentvalue={'prefix': 'Time: '},
+        pad={'t': 50},
+        steps=slider_steps
+    )]
+
+    ### Set Axis Limits and Update Axes for Each Subplot ###
+
+    # Margin for both subplots
+    margin = .1
+
+    x_min = -.5
+    x_max = .5
+    y_min = -.3
+    y_max = .5
+    zoom_x_min = -.2
+    zoom_x_max = .25
+    zoom_y_min = -.05
+    zoom_y_max = .35
+    
+
+    # Update axes for Subplot 1
+    fig.update_xaxes(
+        range=[x_min, x_max],
+        title_text='X Position',
+        scaleanchor='y',
+        scaleratio=1,
+        constrain='domain',
+        row=1, col=1
+    )
+    fig.update_yaxes(
+        range=[y_min, y_max],
+        title_text='Y Position',
+        constrain='domain',
+        row=1, col=1
+    )
+
+    # Update axes for Subplot 2
+    fig.update_xaxes(
+        range=[zoom_x_min, zoom_x_max],
+        title_text='X Position',
+        scaleanchor='y2',
+        scaleratio=1,
+        constrain='domain',
+        row=1, col=2
+    )
+    fig.update_yaxes(
+        range=[zoom_y_min, zoom_y_max],
+        title_text='',
+        constrain='domain',
+        row=1, col=2
+    )
+
+    ### Update Figure Layout ###
+    fig.update_layout(
+        width=1200,
+        height=600,
+        autosize=False,
+        updatemenus=[
+            {
+                'type': 'buttons',
+                'buttons': [
+                    {
+                        'label': 'Play',
+                        'method': 'animate',
+                        'args': [None, {
+                            'frame': {'duration': ((1000*c.dt)*frame_decimation)/annimation_speedup, 'redraw': False},
+                            'transition': {'duration': ((1000*c.dt)*frame_decimation)/annimation_speedup, 'easing': 'linear'},
+                            'fromcurrent': True,
+                        }]
+                    },
+                    {
+                        'label': 'Pause',
+                        'method': 'animate',
+                        'args': [[None], {
+                            'frame': {'duration': 0, 'redraw': False},
+                            'mode': 'immediate',
+                            'transition': {'duration': 0}
+                        }]
+                    }
+                ],
+                'showactive': False,
+                'y': -0.1,
+                'x': -0.01
+            }
+        ],
+        sliders=sliders,
+        showlegend=True,
+    )
+
+    # Display the animation
+    if show_fig:
+        fig.show(config={'responsive': False})
+
+    file_name = 'outputs/plotly_animation.html' if output_filename == None else output_filename + '.html'
+    
+    # Ensure output directory exists
+    output_dir = os.path.dirname(file_name)
+    if output_dir and not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+        print(f"Created output directory: {output_dir}")
+
+    fig.write_html(file_name)
+    print(
+        f'Plotly animated plot created with frame_decimation set to {frame_decimation}\n{len(results)} of {org_len} steps animated\nAnimation saved to: {file_name}')
+
 
 def split_columns(df, col_names = None):
     if col_names is None:

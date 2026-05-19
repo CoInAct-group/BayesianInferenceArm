@@ -555,8 +555,9 @@ class Agent:
         # self.debug()
 
     def debug(self):
-        if self.step == 0 and self.trial == 0 and self.run == 0:
-            self.calculate_vel_halflife()
+        if self.time > 2.8 and self.time < 3.1:
+            print(f"time: {self.time}, vis_feedback: {self.visual_feedback}")
+            
 
     def time_to_index(self, time):
         """
@@ -3767,7 +3768,6 @@ class Agent:
         """
         # Initialize a dictionary to hold all new columns
         data_for_df = {}
-
         # Time and step (direct assignment)
         cols_to_extract = ['seed', 'time', 'time_run', 'dt','step', 'trial', 'run', 'visual_feedback', 'proprioceptive_feedback_rad', 'proprioceptive_feedback_omega',
                            'visual_feedback_rotation', 'proprioceptive_offset_rad_j1', 'proprioceptive_offset_omega_j1',
@@ -3777,7 +3777,7 @@ class Agent:
                            'torque_j1_sigma_prop', 'torque_j2_sigma_prop', 'damping_factor_j1', 'damping_factor_j2',
                            'dampen_torque', 'rfd_j1_max', 'rfd_j2_max', 'limit_rfd', 'torque_j1', 'torque_j2', 'torque_j3',
                            'torque_j1_sigma_scaled', 'torque_j2_sigma_scaled', 'P_est_cartesian_ukf',
-                           'trajectory_alpha', 'trajectory_beta', 'planned_max_time_target',
+                           'planned_max_time_target',
                            'rad_j1_target', 'rad_j2_target', 'omega_j1_target', 'omega_j2_target',
                            'rad_j1_target_intermediate', 'rad_j2_target_intermediate',
                            'omega_j1_target_intermediate', 'omega_j2_target_intermediate',

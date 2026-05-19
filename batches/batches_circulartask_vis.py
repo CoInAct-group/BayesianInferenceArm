@@ -3,24 +3,29 @@ import config_ukf as c
 import visualisation as vis
 
 
-batch_name = "kordingwolpert_sim" # Defines folder name
+batch_name = "circular_task_sim_vis1" # Defines folder name
 save_results = True
 param_grid = {
-    "task_type": ["kordingwolpert2004"],
-    "planned_max_time_target" : [2.0],
-    "max_time_per_trial" : [2.0],
-    "r_target" : [0.005],
+    "task_type": ["circular_following"],
+    "use_optimal_control_planner": [True],
+    "use_receeding_horizon": [True],
+    "constant_remaining_time": [True],
+    "apply_proprioceptive_noise": [False],
+    "apply_visual_noise": [False],
+    "apply_motor_noise": [False],
+    "planned_max_time_target": [0.2],
+    "max_time_per_trial": [8],
+    "vary_p_shoulder_init": [True],
     "n_runs": [1],
-    "n_trials": [10],
-    "visual_offset": [np.array([0.0, 0.0]), np.array([0.01, 0.0]), np.array([-0.01, 0.0]), np.array([0.005, 0.0]), np.array([-0.005, 0.0])],
+    # "simulation_seed": [42],
+    "n_trials": [1],
+    # "visual_offset": [np.array([0.0, 0.0]), np.array([0.05, 0.0]), np.array([-0.05, 0.0])],
+    "visual_offset": [np.array([-0.05, 0.0])],
+    "vis_p_sigma": [0.001],
     "prop_rad_sigma": [0.015, 0.06],
     "prop_omega_sigma": [0.015, 0.06],
     "prop_unit": ["rad"],
-    "vis_p_sigma": [0.001],
-    "visual_blur": [0.001, 0.0015, 0.003],
-    "visual_intervention_bool": [True],
-    "visual_feedback_bool_onset": [0.1],
-    "visual_feedback_duration": [0.1],
+    "visual_feedback": [True],
     "ukf_std_rad_j1_init": [1.0],
     "ukf_std_rad_j2_init": [1.0],
     "ukf_std_omega_j1_init": [1.0],
@@ -32,20 +37,28 @@ param_grid = {
 allowed_pairs = [
     {"prop_rad_sigma": 0.015, "prop_omega_sigma": 0.06},
     {"prop_rad_sigma": 0.06, "prop_omega_sigma": 0.015},
+    # {"prop_rad_sigma": 0.08, "prop_omega_sigma": 0.015},
+    # {"prop_rad_sigma": 0.06, "prop_omega_sigma": 0.06},
 ]
 # Define visualization functions to run for each batch iteration
 plot_functions = [  
-    # vis.plotly_animation, 
-    # vis.plot_joint_angles,
+    vis.plotly_animation3,
+    # vis.plot_joint_angles
 ]
-plot_file_type = "pdf" # "pdf" or "png" # TODO: add png
-reps_resample = 10 # repetitions per parameter setting, spread across different cores, e.g. if param_grid gives 3 combinations and reps = 4, then 12 cores will be used
+plot_extra_text = [
+    "proprioceptive_offset_rad_j1", "proprioceptive_offset_omega_j1", 
+    "proprioceptive_offset_rad_j2", "proprioceptive_offset_omega_j2", 
+    "j1_motor_flexion_bias", "j1_motor_extension_bias", 
+    "j2_motor_flexion_bias", "j2_motor_extension_bias"
+]
+plot_file_type = "png" # "pdf" or "png" # TODO: add png
+reps_resample = 1 # repetitions per parameter setting, spread across different cores, e.g. if param_grid gives 3 combinations and reps = 4, then 12 cores will be used
 reps_identical = 1 # repetitions per parameter setting, spread across different cores, e.g. if param_grid gives 3 combinations and reps = 4, then 12 cores will be used
 
 
 # Define all cols that should be saved after batch run
 save_all_cols = False
-save_cols = [
+save_cols = [ 
     "dt", 
     "visual_offset_x", "visual_offset_y", "r_target",
     'seed', 
@@ -62,6 +75,7 @@ save_cols = [
     'target_x', 'target_y', 'vis_p_sigma',
     'visual_feedback',
     'rad_j1_target', 'rad_j2_target',
+    'm_upper_arm_believed_offset', 'm_lower_arm_believed_offset',
     ]
 manipulated_vars = list(param_grid.keys())
 
