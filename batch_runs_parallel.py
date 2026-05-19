@@ -15,17 +15,7 @@ import inspect
 import visualisation as vis
 import winsound
 
-# from batches import batches_cody1990_onset as b
-# from batches import batches_fournerett1997 as b
-# from batches import batches_kordingwolpert2004 as b
-
-# from batches import batches_circulartask as b
-# from batches import batches_seqreachingtask as b
-# from batches import batches_roll1982 as b
-
-# from batches import batches_kordingwolpert2004_vis as b
-from batches import batches_circulartask_vis as b
-# from batches import batches_seqreachingtask_vis as b
+from batches import batches_seq_targets_test_1 as b
 
 
 winsound.MessageBeep()  

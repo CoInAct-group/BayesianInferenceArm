@@ -40,48 +40,24 @@ class Agent:
             self.force_field_on = c.force_field_on
             self.force_field_vector = c.force_field_vector
             self.force_field_magnitude = c.force_field_magnitude
+        self.apply_hand_friction = c.apply_hand_friction
 
         # Agent parameters
-        self.apply_proprioceptive_noise = c.apply_proprioceptive_noise
-        self.apply_visual_noise = c.apply_visual_noise
-        self.apply_motor_noise = c.apply_motor_noise
-        self.passive_movement = c.passive_movement
-        self.movement_target = c.movement_target
-
         self.elbow_down = c.elbow_down
-        self.min_time_before_movement = c.min_time_before_movement
         self.trial_ended_by_agent = False
         self.self_terminate = c.self_terminate
 
         # Arm parameters - Static
         if self.elbow_down:
             self.p_shoulder_z = c.p_shoulder_z
-        self.vary_p_shoulder_init = c.vary_p_shoulder_init
-        if self.vary_p_shoulder_init:
-            p_shoulder_angle_init = self.rng.uniform(0., 2*np.pi)
-            p_shoulder_r = self.rng.uniform(0., c.p_shoulder_init_r)
-            x_j1 = p_shoulder_r * np.cos(p_shoulder_angle_init) + c.p_shoulder_init[0]
-            y_j1 = p_shoulder_r * np.sin(p_shoulder_angle_init) + c.p_shoulder_init[1]
-            self.p_shoulder = np.array([x_j1, y_j1], dtype=float)
-        else:
-            self.p_shoulder = np.array(c.p_shoulder_init, dtype=float)
-
-        self.len_upper_arm_believed_offset = c.len_upper_arm_believed_offset 
-        self.len_lower_arm_believed_offset = c.len_lower_arm_believed_offset 
-        self.m_upper_arm_believed_offset = c.m_upper_arm_believed_offset
-        self.m_lower_arm_believed_offset = c.m_lower_arm_believed_offset
+        
+        self.p_shoulder = np.array(c.p_shoulder_init, dtype=float)
 
         # Store true physical parameters from config
         self.true_len_upper_arm = c.len_upper_arm
         self.true_len_lower_arm = c.len_lower_arm
         self.true_m_upper_arm = c.m_upper_arm
         self.true_m_lower_arm = c.m_lower_arm
-
-        # Believed parameters used by the agent for planning/inference
-        self.belief_len_upper_arm = c.len_upper_arm + self.len_upper_arm_believed_offset
-        self.belief_len_lower_arm = c.len_lower_arm + self.len_lower_arm_believed_offset
-        self.belief_m_upper_arm = c.m_upper_arm + self.m_upper_arm_believed_offset
-        self.belief_m_lower_arm = c.m_lower_arm + self.m_lower_arm_believed_offset
 
         self.lim_j1_min = np.deg2rad(c.lim_j1_min)
         self.lim_j1_max = np.deg2rad(c.lim_j1_max)
@@ -104,122 +80,20 @@ class Agent:
         self.alpha_j1 = 0.0 
         self.alpha_j2 = 0.0 
 
-        # Proprioceptive sigmas (for measurement noise R_ukf and sampling if needed)
-
-        if c.prop_unit == "deg":
-            self.prop_rad_j1_sigma = np.deg2rad(c.prop_rad_sigma) / np.sqrt(self.dt)
-            self.prop_omega_j1_sigma = np.deg2rad(c.prop_omega_sigma) / np.sqrt(self.dt)
-            self.prop_rad_j2_sigma = np.deg2rad(c.prop_rad_sigma) / np.sqrt(self.dt)
-            self.prop_omega_j2_sigma = np.deg2rad(c.prop_omega_sigma) / np.sqrt(self.dt)
-        else:
-            self.prop_rad_j1_sigma = c.prop_rad_sigma / np.sqrt(self.dt)
-            self.prop_omega_j1_sigma = c.prop_omega_sigma / np.sqrt(self.dt)
-            self.prop_rad_j2_sigma = c.prop_rad_sigma / np.sqrt(self.dt)
-            self.prop_omega_j2_sigma = c.prop_omega_sigma / np.sqrt(self.dt)
-
         # Torque parameters
         self.torque_j1 = 0.0
         self.torque_j2 = 0.0
         self.torque_j3 = 0.0
 
-        # Related to external torque estimation
-        self.tau_ext_j1 = 0.0
-        self.tau_ext_j2 = 0.0
-        self.torque_j1_external_exp = 0.0
-        self.torque_j2_external_exp = 0.0
-        self.torque_j1_external_exp_sigma = 0.0
-        self.torque_j2_external_exp_sigma = 0.0
-
-
-        self.ukf_external_force_noise_sigma = c.ukf_external_force_noise_sigma
-        self.torque_j1_sigma_const = c.torque_sigma_const
-        self.torque_j1_sigma_prop = c.torque_sigma_prop
-        self.torque_j1_sigma_scaled = self.torque_j1_sigma_const
-        self.torque_j2_sigma_const = c.torque_sigma_const
-        self.torque_j2_sigma_prop = c.torque_sigma_prop
-        self.torque_j2_sigma_scaled = self.torque_j2_sigma_const
-        self.torque_j1_efferent = 0.0
-        self.torque_j2_efferent = 0.0
-
-        # Joint torque limits
-        self.torque_j1_max = c.torque_j1_max
-        self.torque_j2_max = c.torque_j2_max
-        self.rfd_j1_max = self.torque_j1_max * (self.dt/c.time_to_max_force)
-        self.rfd_j2_max = self.torque_j2_max * (self.dt/c.time_to_max_force)
-        self.limit_rfd = c.limit_rfd
         self.damping_factor_j1 = c.damping_factor_j1
         self.damping_factor_j2 = c.damping_factor_j2
-        self.damping_factor_believed_offset_j1 = c.damping_factor_believed_offset_j1
-        self.damping_factor_believed_offset_j2 = c.damping_factor_believed_offset_j2
-
-        # Hand friction (task-space) parameters
-        self.apply_hand_friction = c.apply_hand_friction
-        if self.apply_hand_friction:
-            self.hand_friction_c = c.hand_friction_c
-            self.hand_friction_matrix = np.diag([self.hand_friction_c, self.hand_friction_c])
-
-        # Proprioceptive parameters
-        # Proprioceptive sampling values (interventions may change these from true values)
-        self.proprioceptive_feedback_rad_all_steps = np.repeat(c.proprioceptive_feedback_rad, self.n_steps_max)
-        self.proprioceptive_feedback_omega_all_steps = np.repeat(c.proprioceptive_feedback_omega, self.n_steps_max)
-        self.proprioceptive_feedback_rad = self.proprioceptive_feedback_rad_all_steps[0]
-        self.proprioceptive_feedback_omega = self.proprioceptive_feedback_omega_all_steps[0]
-        self.prop_rad_j1 = self.rad_j1  
-        self.prop_omega_j1 = self.omega_j1
-        self.prop_rad_j2 = self.rad_j2
-        self.prop_omega_j2 = self.omega_j2
-
-        # Proprioceptive interventions
-        self.proprioceptive_intervention_bool_all_steps = np.repeat(c.proprioceptive_intervention_bool, self.n_steps_max)
-        self.proprioceptive_intervention_bool_all_steps[self.time_to_index(c.proprioceptive_intervention_on[0]):self.time_to_index(c.proprioceptive_intervention_on[1])] = True
-        self.proprioceptive_intervention_bool = self.proprioceptive_intervention_bool_all_steps[0]
-        self.proprioceptive_intervention_on_angle = 0
-        self.proprioceptive_intervention_on_angle_rad = 0
-        self.proprioceptive_offset_rad_j1 = np.deg2rad(c.proprioceptive_offset_rad_j1)
-        self.proprioceptive_offset_omega_j1 = np.deg2rad(c.proprioceptive_offset_omega_j1)
-        self.proprioceptive_offset_rad_j2 = np.deg2rad(c.proprioceptive_offset_rad_j2)
-        self.proprioceptive_offset_omega_j2 = np.deg2rad(c.proprioceptive_offset_omega_j2)
-        self.proprioceptive_multiplier_omega_j1 = c.proprioceptive_multiplier_omega_j1
-        self.proprioceptive_multiplier_omega_j2 = c.proprioceptive_multiplier_omega_j2
-
-        # Motor output bias (multiplicative)
-        self.j1_motor_flexion_bias = c.j1_motor_flexion_bias
-        self.j1_motor_extension_bias = c.j1_motor_extension_bias
-        self.j2_motor_flexion_bias = c.j2_motor_flexion_bias
-        self.j2_motor_extension_bias = c.j2_motor_extension_bias
-
-        # Visual parameters
-        self.visual_feedback_first_step = c.visual_feedback_first_step
-        self.visual_feedback_all_steps = np.repeat(c.visual_feedback, self.n_steps_max)
-        self.visual_feedback_all_steps[self.time_to_index(c.visual_feedback_on[0]):self.time_to_index(c.visual_feedback_on[1])] = True
-        self.visual_feedback = self.visual_feedback_all_steps[0]
-        self.apply_visual_innovation = c.apply_visual_innovation
-        self.vis_p_hand = self.p_hand # Visual hand position (interventions may change this from true hand position)
-        self.vis_hand_j1 = self.rad_j1
-        self.vis_hand_j2 = self.rad_j2
-        self.vis_p_sigma = c.vis_p_sigma / np.sqrt(self.dt)
-        self.vis_p_hand_sigma = self.vis_p_sigma
-        self.vis_p_hand_mu = self.rng.normal(self.vis_p_hand, self.vis_p_sigma)
-        self.vis_p_target_mu = np.array([np.nan, np.nan])
-
-        # Visual interventions
-        self.visual_intervention_bool_all_steps = np.repeat(c.visual_intervention_bool, self.n_steps_max)
-        self.visual_intervention_bool_all_steps[self.time_to_index(c.visual_intervention_on[0]):self.time_to_index(c.visual_intervention_on[1])] = True
-        self.visual_intervention_bool = self.visual_intervention_bool_all_steps[0]
-        self.visual_offset = c.visual_offset
-        self.visual_feedback_rotation = np.deg2rad(c.visual_feedback_rotation)
-        self.visual_intervention_rotate_around = None
-        self.visual_feedback_bool_onset = 0.0
-        self.visual_feedback_duration = 0.0
-        self.visual_feedback_bool_onset_time = None
-        self.visual_intervention_bool_onset = 0.0
 
         self.setup_target()
         self.setup_true_state()
-        self.setup_ukf()
 
     def setup_target(self):
         # Target parameters
+        self.p_target_list = c.p_target_list
         self.task_type = c.task_type
         self.j1_locked = True if "j1_locked" in self.task_type else False
         self.j1_locked_angle_rad = np.deg2rad(c.j1_locked_angle)
@@ -233,6 +107,7 @@ class Agent:
         self.p_target_final = None
         self.p_target_home = None
         self.p_target_out = None
+        self.min_time_before_movement = c.min_time_before_movement
 
         # Target parameters in joint space
         self.rad_j1_target, self.rad_j2_target, _ = self.inverse_kinematics(self.p_target, clip_limits=False, true_physics=True)
@@ -310,134 +185,8 @@ class Agent:
         self.torque_j2 = -torque_g_j2_mu
         self.torque_j1_efferent = self.torque_j1
         self.torque_j2_efferent = self.torque_j2
-
-    def setup_ukf(self):
-        """
-        Sets up the UKF.
-        """
-        # Initialize state vectors and covariance matrix
-        # UKF parameters
-
-        # UKF state variables
-        # Eq. \ref{eq:state}: x_k = [q1, q2, dq1, dq2, tau_ext1, tau_ext2]^T
-        self.est_tau_ext = c.est_tau_ext
-        if self.est_tau_ext:
-            self.x_ukf = np.array([
-                self.rad_j1, self.rad_j2, self.omega_j1, self.omega_j2,
-                self.tau_ext_j1, self.tau_ext_j2  # tau_ext_j1, tau_ext_j2 are external ummodelled torques (i.e. not from gravity, friction, etc., could be force field)
-                ], dtype=float)
-        else:
-            self.x_ukf = np.array([
-                self.rad_j1, self.rad_j2, self.omega_j1, self.omega_j2
-            ], dtype=float)
-        # UKF estimated state vector
-        self.x_est_ukf = self.x_ukf.copy()
-
-        # Number of states, [rad_j1, rad_j2, omega_j1, omega_j2, tau_ext_j1, tau_ext_j2]
-        self.L_ukf = self.x_est_ukf.shape[0]
-        self.ukf_alpha = c.ukf_alpha
-        self.ukf_beta = c.ukf_beta
-        self.ukf_kappa = c.ukf_kappa
-        # Eq. \ref{eq:lambda}: lambda = alpha^2 (L + kappa) - L
-        self.lambda_ukf = self.ukf_alpha**2 * (self.L_ukf + self.ukf_kappa) - self.L_ukf
-        
-        if self.j1_locked:
-            self.x_ukf[0] = self.j1_locked_angle_rad
-            self.x_ukf[2] = 0.0
-            self.x_est_ukf = self.x_ukf.copy()
-
-        # UKF state covariance matrix
-        if self.est_tau_ext:
-            self.P_ukf = np.diag([
-                (np.deg2rad(c.ukf_std_rad_j1_init))**2,  # Initial position noise
-                (np.deg2rad(c.ukf_std_rad_j2_init))**2,  # Initial position noise
-                (np.deg2rad(c.ukf_std_omega_j1_init))**2,  # Initial velocity noise
-                (np.deg2rad(c.ukf_std_omega_j2_init))**2,  # Initial velocity noise
-                (c.ukf_std_tau_ext_init)**2,  # Initial external torque disturbance (Nm^2)
-                (c.ukf_std_tau_ext_init)**2
-            ])
-        else:
-            self.P_ukf = np.diag([
-                (np.deg2rad(c.ukf_std_rad_j1_init))**2,  # Initial position noise
-                (np.deg2rad(c.ukf_std_rad_j2_init))**2,  # Initial position noise
-                (np.deg2rad(c.ukf_std_omega_j1_init))**2,  # Initial velocity noise
-                (np.deg2rad(c.ukf_std_omega_j2_init))**2,  # Initial velocity noise
-            ])
-        self.P_pred_ukf = np.full((self.L_ukf, self.L_ukf), np.nan) # Predicted covariance matrix
-
-        if self.j1_locked:
-            self.P_ukf[0, 0] = 1e-12
-            self.P_ukf[2, 2] = 1e-12
-
-        # Process noise covariance (will be updated each step in update_process_noise)
-        # Eq. \ref{eq:Q}: block-diagonal process covariance (tau_ext RW scaled by dt per Eq. \ref{eq:tauExtRW})
-        if self.est_tau_ext:
-            self.Q_ukf = np.diag([
-                (np.deg2rad(c.ukf_process_noise_std_rad_j1))**2,  # Position
-                (np.deg2rad(c.ukf_process_noise_std_rad_j2))**2,  # Position
-                (np.deg2rad(c.ukf_process_noise_std_omega_j1))**2,  # Velocity
-                (np.deg2rad(c.ukf_process_noise_std_omega_j2))**2,  # Velocity
-                    (c.ukf_tau_ext_rw_sigma**2) * self.dt,  # Disturbance torque random-walk (Nm^2)
-                    (c.ukf_tau_ext_rw_sigma**2) * self.dt
-                ])
-        else:
-            self.Q_ukf = np.diag([
-                (np.deg2rad(c.ukf_process_noise_std_rad_j1))**2,  # Position
-                (np.deg2rad(c.ukf_process_noise_std_rad_j2))**2,  # Position
-                (np.deg2rad(c.ukf_process_noise_std_omega_j1))**2,  # Velocity
-                (np.deg2rad(c.ukf_process_noise_std_omega_j2))**2,  # Velocity
-            ])
-        
-        if self.j1_locked: 
-            self.Q_ukf[0, 0] = 1e-12
-            self.Q_ukf[2, 2] = 1e-12
-            
-        # Measurement vector, number of possible measurements
-        self.num_measurements_ukf = 6 # vis_x, vis_y, prop_rad1, prop_rad2, prop_omega1, prop_omega2
-        self.z_ukf = np.full(self.num_measurements_ukf, np.nan) # Measurement vector (shape (6,)), [vis_x, vis_y, prop_rad1, prop_rad2, prop_omega1, prop_omega2]
-        # Measurement noise covariance
-        # Eq. \ref{eq:R}: measurement covariance for [vis_x, vis_y, q1, q2, dq1, dq2]
-        self.R_ukf = np.diag([(self.vis_p_sigma)**2, ( self.vis_p_sigma)**2, # Visual noise
-                              (self.prop_rad_j1_sigma)**2, (self.prop_rad_j2_sigma)**2, # Proprioceptive position noise
-                              (self.prop_omega_j1_sigma)**2, (self.prop_omega_j2_sigma)**2]) # Proprioceptive velocity noise
-
-        if self.j1_locked:
-            self.R_ukf[2, 2] = 1e-12 # No uncertainty in proprioception of j1 angle
-            self.R_ukf[4, 4] = 1e-12 # No uncertainty in proprioception of j1 velocity
-
-        # Sigma points
-        self.n_sigma_points = 2 * self.L_ukf + 1 # Number of sigma points
-        self.sigmas_ukf = np.full((self.L_ukf, self.n_sigma_points), np.nan) # Sigma points for current state
-        # Weights for sigma points
-        self.W_m_ukf = np.full(self.n_sigma_points, 1 / (2 * (self.L_ukf + self.lambda_ukf))) # Weights for mean
-        self.W_c_ukf = np.full(self.n_sigma_points, 1 / (2 * (self.L_ukf + self.lambda_ukf))) # Weights for covariance
-        self.sigmas_f_ukf = np.full((self.L_ukf, self.n_sigma_points), np.nan) # Sigma points for predicted state
-        self.x_pred_ukf = np.full(self.L_ukf, np.nan) # Predicted state vector
-        self.z_pred_visual_ukf = np.full(2, np.nan) # Predicted visual hand Cartesian output (shape (2,))
-        
-        # Cartesian posterior estimates 
-        self.L_cart_ukf = 6 # Dimensionality: x_h, y_h, vx_h, vy_h, x_e, y_e
-        self.x_est_cartesian_ukf = np.full(self.L_cart_ukf, np.nan) # Shape (6,)
-        self.P_est_cartesian_ukf = np.full((self.L_cart_ukf, self.L_cart_ukf), np.nan)
-        self.sigmas_cartesian_transformed = np.full((self.L_cart_ukf, 2 * self.L_cart_ukf + 1), np.nan)
-
-        # Surprise/Error Metrics
-        self.normalized_innovation_ukf = np.full(self.num_measurements_ukf, np.nan) # Component-wise normalized innovation
-        self.full_innovation_ukf = np.full(self.num_measurements_ukf, np.nan) # z_k - E[h(x_pred_k)]
-        self.diag_P_z_full_ukf = np.full(self.num_measurements_ukf, np.nan) # Diagonal of full predicted measurement covariance matrix (P_z + R)
-
-        # Visual feedback impact analysis matrices
-        self.K_ukf = np.full((self.L_ukf, self.num_measurements_ukf), np.nan) # Kalman gain matrix
-        self.P_xz_available = np.full((self.L_ukf, self.num_measurements_ukf), np.nan) # Cross-covariance matrix
-        self.measurement_available_mask = np.full(self.num_measurements_ukf, False) # Available measurement mask
-        self.innovation_available = np.full(self.num_measurements_ukf, np.nan) # Available innovations
-
-        # Initialize Sigma Points and Weights
-        self.generate_sigma_weights()
-        # self.sigmas_ukf will be generated in the predict/update step
-
-        # Calculate and store predicted visual output based on x_pred_ukf
-        self.ukf_predict(torque_j1_efferent=self.torque_j1_efferent, torque_j2_efferent=self.torque_j2_efferent)
+        self.tau_ext_j1 = 0.0
+        self.tau_ext_j2 = 0.0
 
     def final_initialization(self):
         """
@@ -445,10 +194,6 @@ class Agent:
         """
         self.apply_torques_to_joints(0, 0)
         self.target_state_in_joint_space_exact()
-        self.update_visual_and_proprioceptive_representations()
-        self.update_process_noise() 
-        self.ukf_predict(torque_j1_efferent=0, torque_j2_efferent=0)
-        self.ukf_update()
 
     def start_new_run(self, run):
         """Prepares the agent for a new run by resetting its state and trial count."""
@@ -467,41 +212,8 @@ class Agent:
         self.target_reached = False
         self.trial_ended_by_agent = False
 
-        if self.task_type == "repeated_reaching":
-            self.setup_repeated_reaching_task()
-
-        elif self.task_type == "tapping":
-            self.setup_tapping_task()
-
-        elif self.task_type == "j1_locked_reaching":
-            self.setup_j1_locked_reaching_task()
-
-        elif self.task_type == "cody1990":
-            self.setup_cody1990_task()
-
-        elif self.task_type == "roll1982":
-            self.setup_roll1982_task()
-
-        elif self.task_type == "patterson2017":
-            self.setup_patterson_2017_task()
-
-        elif self.task_type == "fournerett1997":
-            self.setup_fournerett_jeannerod_1997_task()
-
-        elif self.task_type == "maze_seq_reaching":
-            self.setup_maze_seq_reaching_task()
-
-        elif self.task_type == "circular_following":
-            self.setup_circular_following_task()
-
-        elif self.task_type == "kordingwolpert2004":
-            self.setup_kordingwolpert_2004_task()
-        
-        elif self.task_type == "seq_reaching":
-            self.setup_seq_reaching_task()
-
-        elif self.task_type == "testing":
-            self.setup_testing_task()
+        if self.task_type == "seq_targets":
+            self.setup_seq_targets()
 
         elif self.task_type in c.task_types:
             raise ValueError(f"Task type {c.task_type}, is not yet implemented in the setup_task method.")
@@ -525,30 +237,29 @@ class Agent:
         self.apply_torques_to_joints(self.torque_j1, self.torque_j2)
         self.p_elbow, self.p_hand = self.forward_kinematics(self.rad_j1, self.rad_j2, true_physics=True)
         self.v_hand = self.update_velocity_hand(true_physics=True)
-        self.I_j1, _, self.I_j2, _ = self.calculate_moments_of_inertia(self.rad_j2) # Calc new moments of inertia
+        # self.I_j1, _, self.I_j2, _ = self.calculate_moments_of_inertia(self.rad_j2) # Calc new moments of inertia
 
         # Move target and update target state in joint space
         self.move_target()
         self.target_state_in_joint_space_exact()
 
         # Update target and visual and proprioceptive representations of target and arm (incl. experimental interventions)
-        self.update_visual_and_proprioceptive_representations()
+        # self.update_visual_and_proprioceptive_representations()
 
         # Predict expected sensory inputs
-        self.update_process_noise() # Expected process (acceleration) noise, given previous efferent torque and state
-        self.ukf_predict(torque_j1_efferent=self.torque_j1_efferent, torque_j2_efferent=self.torque_j2_efferent)
+        # self.update_process_noise() # Expected process (acceleration) noise, given previous efferent torque and state
+        # self.ukf_predict(torque_j1_efferent=self.torque_j1_efferent, torque_j2_efferent=self.torque_j2_efferent)
 
         # Sample proprioceptive and visual input
-        self.ukf_update()
+        # self.ukf_update()
 
 
-        self.calculate_expected_external_torques()
-        self.torque_j1_efferent, self.torque_j2_efferent = self.calculate_torques()
+        self.torque_j1, self.torque_j2 = self.calc_torques(current_state = np.array([self.rad_j1, self.rad_j2, self.omega_j1, self.omega_j2], dtype=float))
 
 
-        self.torque_j1, self.torque_j2 = self.motor_noise(
-                    self.torque_j1_efferent, self.torque_j2_efferent, 
-                    self.torque_j1_sigma_scaled, self.torque_j2_sigma_scaled)
+        # self.torque_j1, self.torque_j2 = self.motor_noise(
+        #             self.torque_j1_efferent, self.torque_j2_efferent, 
+        #             self.torque_j1_sigma_scaled, self.torque_j2_sigma_scaled)
 
         self.check_target_reached() 
         self.save_step() 
@@ -567,231 +278,18 @@ class Agent:
         if index >= self.n_steps_max:
             index = self.n_steps_max - 1
         return index
-
-    def setup_j1_locked_reaching_task(self):
+    
+    def setup_seq_targets(self):
         """
-        Sets up a reaching task for the j1_locked task.
+        Set a sequence of target locations, given a list. Once within a trigger dist of each target, shift to next target in sequence. 
         """
-
-        self.reset()
-        self.j1_locked = True
-        self.use_simplified_model = True
-        self.self_terminate = c.self_terminate
-
-        # Set initial state
-        self.rad_j1 = self.j1_locked_angle_rad
-        self.rad_j2 = self.rad_j2_hand_init
-        self.omega_j1 = 0.0
-        self.omega_j2 = 0.0
-        self.p_elbow, self.p_hand = self.forward_kinematics(self.rad_j1, self.rad_j2)
-        self.p_hand_prev = self.p_hand
-        if self.est_tau_ext:
-            self.x_ukf = np.array([self.rad_j1, self.rad_j2, self.omega_j1, self.omega_j2, self.tau_ext_j1, self.tau_ext_j2], dtype=float)
-        else:
-            self.x_ukf = np.array([self.rad_j1, self.rad_j2, self.omega_j1, self.omega_j2], dtype=float)
-        self.x_est_ukf = self.x_ukf.copy()
-
-        # Set target state
-        self.j1_locked_angle_rad = np.deg2rad(c.j1_locked_angle)
-        deg_target_init_rel = self.rng.uniform(c.deg_j2_target_init[0], c.deg_j2_target_init[1])
-        self.rad_j2_target_init_rel = np.deg2rad(deg_target_init_rel)
-        self.rad_j2_target_init = self.rad_j2_target_init_rel + self.rad_j2_hand_init
-        self.omega_j2_target_init = np.deg2rad(c.omega_j2_target_init)
-        _, self.p_target = self.forward_kinematics(self.j1_locked_angle_rad, self.rad_j2_target_init)
-        self.rad_j1_target = self.j1_locked_angle_rad
-        self.rad_j2_target = self.rad_j2_target_init
-        self.omega_j1_target = 0.0
-        self.omega_j2_target = self.omega_j2_target_init
-
-        planned_move_speed_ds_intercept_mu = 19.0
-        planned_move_speed_ds_intercept_sigma = 5.0
-        planned_move_speed_ds_slope_mu = 0.34
-        planned_move_speed_ds_slope_sigma = 0.1
-
-        # Plan speed/movement time
-        self.planned_move_speed_ds_intercept = self.rng.normal(planned_move_speed_ds_intercept_mu, planned_move_speed_ds_intercept_sigma)
-        self.planned_move_speed_ds_slope = self.rng.normal(planned_move_speed_ds_slope_mu, planned_move_speed_ds_slope_sigma)
-        self.planned_move_speed_ds = self.planned_move_speed_ds_intercept + (self.planned_move_speed_ds_slope * np.abs(deg_target_init_rel))
-        self.planned_max_time_target = np.clip(np.abs(deg_target_init_rel) / self.planned_move_speed_ds, 0.5, 4.0)
-
-        self.P_ukf[0, 0] = 1e-12
-        self.P_ukf[2, 2] = 1e-12
-
-    def setup_kordingwolpert_2004_task(self):
-        """
-        Sets up a reaching task for the Kording and Wolpert 2004 experiment, "Bayesian integration in sensorimotor learning".
-        """
-        self.reset()
-        self.x_est_ukf = self.x_ukf.copy()
-        self.p_target = self.p_hand_init + np.array([
-            0.0,
-            0.2])
-        self.visual_feedback_bool_onset = c.visual_feedback_bool_onset # meters from start, y
-        self.visual_feedback_duration = c.visual_feedback_duration # seconds
-        self.visual_feedback_bool_onset_time = None
-        self.visual_feedback_all_steps = np.repeat(False, self.n_steps_max)
-        self.visual_blur = c.visual_blur
-        self.R_ukf[0, 0] = (self.visual_blur/np.sqrt(self.dt))**2 # agent-assumed visual x noise
-        self.R_ukf[1, 1] = (self.visual_blur/np.sqrt(self.dt))**2 # agent-assumed visual y noise
-
-    def setup_roll1982_task(self):
-        """
-        Sets up a reaching task for the roll1982 task.
-        """
-
-        self.reset()
-        # Prevent movement of shoulder join
-        self.j1_locked = True
-
-        # Set very high certainty for shoulder joint position and velocity
-        self.P_ukf[0, 0] = 1e-12
-        self.P_ukf[2, 2] = 1e-12
-
-        # Set initial state
-        self.rad_j1 = self.j1_locked_angle_rad
-        self.rad_j2 = self.rad_j2_hand_init
-        self.omega_j1 = 0.0
-        self.omega_j2 = 0.0
-        self.p_elbow, self.p_hand = self.forward_kinematics(self.rad_j1, self.rad_j2)
-        self.p_hand_prev = self.p_hand
-        if self.est_tau_ext:
-            self.x_ukf = np.array([self.rad_j1, self.rad_j2, self.omega_j1, self.omega_j2, self.tau_ext_j1, self.tau_ext_j2], dtype=float)
-        else:
-            self.x_ukf = np.array([self.rad_j1, self.rad_j2, self.omega_j1, self.omega_j2], dtype=float)
-        
-        self.x_est_ukf = self.x_ukf.copy()
-
-
-    def setup_cody1990_task(self):
-        """
-        Sets up a reaching task for the cody1990 task.
-        """
-
-        self.reset()
-        # Prevent movement of shoulder join
-        self.j1_locked = True
-
-        # Set very high certainty for shoulder joint position and velocity
-        self.P_ukf[0, 0] = 1e-12
-        self.P_ukf[2, 2] = 1e-12
-
-        # Set initial state
-        self.rad_j1 = self.j1_locked_angle_rad
-        self.rad_j2 = self.rad_j2_hand_init
-        self.omega_j1 = 0.0
-        self.omega_j2 = 0.0
-        self.p_elbow, self.p_hand = self.forward_kinematics(self.rad_j1, self.rad_j2)
-        self.p_hand_prev = self.p_hand
-        if self.est_tau_ext:
-            self.x_ukf = np.array([self.rad_j1, self.rad_j2, self.omega_j1, self.omega_j2, self.tau_ext_j1, self.tau_ext_j2], dtype=float)
-        else:
-            self.x_ukf = np.array([self.rad_j1, self.rad_j2, self.omega_j1, self.omega_j2], dtype=float)
-        
-        self.x_est_ukf = self.x_ukf.copy()
-
-        # Set target state
-        self.j1_locked_angle_rad = np.deg2rad(c.j1_locked_angle)
-        deg_target_init_rel = self.rng.uniform(c.deg_j2_target_init[0], c.deg_j2_target_init[1])
-        self.rad_j2_target_init_rel = np.deg2rad(deg_target_init_rel)
-        self.rad_j2_target_init = self.rad_j2_target_init_rel + self.rad_j2_hand_init
-        self.omega_j2_target_init = np.deg2rad(c.omega_j2_target_init)
-        _, self.p_target = self.forward_kinematics(self.j1_locked_angle_rad, self.rad_j2_target_init)
-        self.rad_j1_target = self.j1_locked_angle_rad
-        self.rad_j2_target = self.rad_j2_target_init
-        self.omega_j1_target = 0.0
-        self.omega_j2_target = self.omega_j2_target_init
-
-        self.proprioceptive_intervention_on_angle = c.proprioceptive_intervention_on_angle
-        self.proprioceptive_intervention_on_angle_rad = self.rad_j2 + np.deg2rad(self.proprioceptive_intervention_on_angle)
-
-    def setup_fournerett_jeannerod_1997_task(self):
-        """
-        Sets up a trial for the Fournerett and Jeannerod 1997 experiment.
-        """
-        self.reset()
-        self.x_est_ukf = self.x_ukf.copy()
-        self.p_target = self.p_hand_init + np.array([
-            0.0,
-            0.222])
-        self.visual_intervention_bool_onset = 0.057 # meters from start, y
-
-    def setup_testing_task(self):
-        """
-        Sets up a trial for the testing task.
-        """
-        self.reset()
-        self.x_est_ukf = self.x_ukf.copy()
-        self.p_target = self.p_hand_init + np.array([
-            0.0,
-            0.2])
-
-    def setup_patterson_2017_task(self):
-        """
-        Sets up a trial for the Patterson et al 2017 experiment.
-        """
-        self.elbow_down = False
-        self.patterson_dir_final_target = c.patterson_dir_final_target
-        self.vary_p_shoulder_init = False
-        self.self_terminate = False
-        self.r_target_out = 0.0115
-        self.r_target_home = 0.02
-        if self.trial == 0:
-
-            # Reset dynamic state to prevent carry-over from initial state which used a different arm configuration
-            self.omega_j1, self.omega_j2, self.alpha_j1, self.alpha_j2 = 0.0, 0.0, 0.0, 0.0
-            self.torque_j1, self.torque_j2 = 0.0, 0.0
-            self.torque_j1_efferent, self.torque_j2_efferent = 0.0, 0.0
-            self.j1_integral, self.j2_integral = 0.0, 0.0
-            
-            self.rad_j1 = np.deg2rad(50)
-            self.rad_j2 = np.deg2rad(90)
-            self.p_elbow, self.p_hand = self.forward_kinematics(self.rad_j1, self.rad_j2)
-            self.I_j1, _, self.I_j2, _ = self.calculate_moments_of_inertia(self.rad_j2)
-            self.p_target = self.p_hand + np.array([
-                np.cos(np.deg2rad(120)), 
-                np.sin(np.deg2rad(120))]) * 0.15
-            self.p_target_home = self.p_hand
-            self.p_target_out = self.p_target
-            self.r_target = self.r_target_out
-            self.setup_ukf()
-
-        # Set target position to alternate between home and out position
-        if self.trial % 2 == 0:
-            self.p_target = self.p_target_out
-            self.r_target = self.r_target_out
-        else:
-            self.p_target = self.p_target_home
-            self.r_target = self.r_target_home
-
-        self.p_target_final = self.p_target_home + np.array([
-            np.cos(np.deg2rad(self.patterson_dir_final_target)), 
-            np.sin(np.deg2rad(self.patterson_dir_final_target))]) * 0.05
-        if self.trial == self.n_trials - 1:
-            self.p_target = self.p_target_final
-            self.r_target = self.r_target_out
-
-        # Set visual feedback to only be active for the first 5 trials
-        if self.trial < (c.patterson_n_trials_visual_feedback if hasattr(c, 'patterson_n_trials_visual_feedback') else 5):
-            self.visual_feedback_all_steps = np.repeat(True, self.n_steps_max)
-        else: 
-            self.visual_feedback_all_steps = np.repeat(False, self.n_steps_max)
-
-    def setup_maze_seq_reaching_task(self):
-        """
-        Sets up a trial for the maze sequence reaching task.
-        """
-        self.p_target_secondary = np.array([0.0, 0.08])
-        if self.trial == 0:
-            self.reset()
-            self.p_hand_init = np.array([0.0, 0.0])
-            self.p_target = np.array([0.0, 0.04])
-            self.planned_max_time_target = .6
-            self.setup_true_state()
-            self.setup_ukf()
-        else:
-            self.planned_max_time_target = 1.6
+        self.p_hand_init = np.array([0.0, 0.0])
+        n_targets = len(self.p_target_list)
+        self.p_target = np.array(self.p_target_list[self.trial])
+        if self.trial == n_targets-1:
             self.self_terminate = False
-            self.p_target = self.p_target_secondary
+        else:
+            self.self_terminate = True
 
     def setup_circular_following_task(self):
         """
@@ -815,84 +313,6 @@ class Agent:
         self.visual_feedback_all_steps[int(3.0/self.dt):int(4.0/self.dt)] = True
         self.visual_intervention_bool_all_steps = np.repeat(True, self.n_steps_max)
         self.visual_intervention_bool_all_steps[int(3.0/self.dt):int(4.0/self.dt)] = True
-
-    def setup_tapping_task(self):
-        if self.trial % 2 == 0:
-            self.p_target = c.p_target_even
-        else:
-            self.p_target = c.p_target_odd
-
-    def setup_seq_reaching_task(self):
-        if self.trial % 2 == 0:
-            self.p_target = c.p_target_even
-        else:
-            self.p_target = c.p_target_odd
-        self.visual_feedback_bool_onset = c.visual_feedback_bool_onset # meters from start, y
-        self.visual_feedback_duration = c.visual_feedback_duration # seconds
-        self.visual_feedback_bool_onset_time = None
-        self.visual_feedback_all_steps = np.repeat(False, self.n_steps_max)
-
-    def setup_repeated_reaching_task(self):
-        self.reset()
-        self.p_target = c.p_target_static
-
-    def generate_sigma_weights(self):   
-        """Generates weights for sigma points."""
-        L = self.L_ukf
-        lambda_ = self.lambda_ukf
-        
-        # Weights for mean
-        self.W_m_ukf = np.full(2 * L + 1, 1 / (2 * (L + lambda_)))
-        self.W_m_ukf[0] = lambda_ / (L + lambda_)
-        
-        # Weights for covariance
-        self.W_c_ukf = np.full(2 * L + 1, 1 / (2 * (L + lambda_)))
-        self.W_c_ukf[0] = (lambda_ / (L + lambda_)) + (1 - self.ukf_alpha**2 + self.ukf_beta)
-
-    def generate_sigma_points(self, x_mean, P_cov):
-        """
-        Generates sigma points for a given mean and covariance.
-
-        Args:
-            x_mean (np.ndarray): The mean state vector (L_ukf x 1).
-            P_cov (np.ndarray): The state covariance matrix (L_ukf x L_ukf).
-
-        Returns:
-            np.ndarray: Matrix of sigma points (L_ukf x (2*L_ukf + 1)).
-                        Returns None if Cholesky decomposition fails.
-        """
-
-        sigmas = np.zeros((self.L_ukf, self.n_sigma_points))
-
-        # Ensure P_cov is symmetric and add a small epsilon for numerical stability if needed
-        P_cov_symmetric = (P_cov + P_cov.T) / 2.0 
-        
-        try:
-            # Matrix square root using Cholesky decomposition
-            S = cholesky(P_cov_symmetric, lower=True)
-        except np.linalg.LinAlgError:
-            print("Warning: Cholesky decomposition failed in generate_sigma_points. P_cov might not be positive definite.")
-            # Attempt to add a small identity matrix to P_cov to make it positive definite
-            epsilon = 1e-9 # Small regularization factor
-            try:
-                S = cholesky(P_cov_symmetric + np.eye(self.L_ukf) * epsilon, lower=True)
-                print("Cholesky succeeded with regularization.")
-            except np.linalg.LinAlgError:
-                print("Error: Cholesky decomposition failed even with regularization. Returning None for sigma points.")
-                return None # Indicate failure
-
-        gamma = np.sqrt(self.L_ukf + self.lambda_ukf)
-
-        # Set the first sigma point (the mean)
-        sigmas[:, 0] = x_mean.flatten() # Ensure x_mean is 1D
-
-        # Set the remaining 2*L sigma points
-        for i in range(self.L_ukf):
-            sigmas[:, i + 1]               = x_mean.flatten() + gamma * S[:, i]
-            sigmas[:, i + 1 + self.L_ukf]  = x_mean.flatten() - gamma * S[:, i]
-
-        self.sigmas_ukf = sigmas # Store if needed, or just return
-        return sigmas
 
     def initiate_agent(self):
         """
@@ -930,10 +350,9 @@ class Agent:
                 - j1_angle (float): The calculated j1 angle in radians (NaN if IK failed or solution invalid).
                 - j2_angle (float): The calculated j2 angle in radians (NaN if IK failed or solution invalid).
         """
-        if not self.vary_p_shoulder_init:
-            _, _, outside_limits = self.inverse_kinematics(self.p_hand, clip_limits=False)
-            if outside_limits:
-                raise ValueError(f"p_hand ({self.p_hand}) given p_shoulder ({self.p_shoulder}) is outside reachable workspace")
+        _, _, outside_limits = self.inverse_kinematics(self.p_hand, clip_limits=False)
+        if outside_limits:
+            raise ValueError(f"p_hand ({self.p_hand}) given p_shoulder ({self.p_shoulder}) is outside reachable workspace")
         
         _, _, outside_limits = self.inverse_kinematics(self.p_hand, clip_limits=False)
         if outside_limits:
@@ -1196,131 +615,12 @@ class Agent:
         self.rad_j1_target_radius = max(dev_j1) if dev_j1 else 0.0
         self.rad_j2_target_radius = max(dev_j2) if dev_j2 else 0.0
 
-    def update_process_noise(self):
-        """
-        Updates the process noise covariance matrix Q_ukf for the UKF.
-        The noise is assumed to arise from noise in the applied torques,
-        which propagates to angular acceleration, then velocity, and then position.
-        This calculation uses moments of inertia *estimated* from the agent's
-        posterior state estimate from the previous step (specifically, the mean of rad_j2).
-        It uses a standard model for continuous white noise in acceleration, where
-        Q_c_alpha = Q_c_torque / I_estimated^2, and self.torque_jX_sigma_scaled is
-        treated as the sqrt of the Power Spectral Density (PSD) of the torque noise.
-        The resulting discrete noise variances for position and velocity are:
-        Var(pos_noise) = (1/3) * Q_c_alpha * dt^3
-        Var(vel_noise) = Q_c_alpha * dt
-        A minimum noise level from configuration parameters is enforced.
-        """
-        # Default diagonal values for Q_ukf from configuration (variances)
-        default_Q_ukf_diag = np.array([
-            (np.deg2rad(c.ukf_process_noise_std_rad_j1))**2,
-            (np.deg2rad(c.ukf_process_noise_std_rad_j2))**2,
-            (np.deg2rad(c.ukf_process_noise_std_omega_j1))**2,
-            (np.deg2rad(c.ukf_process_noise_std_omega_j2))**2
-        ])
 
-        # Calculate estimated moments of inertia based on the posterior mean of J2 angle
-        # from the previous UKF update step (self.x_est_ukf).
-        # We use rad_j2_input_sigma=0.0 because we are basing this on the mean estimate.
-        try:
-            # x_est_ukf is [rad_j1, rad_j2, omega_j1, omega_j2]
-            estimated_rad_j2_mu = self.x_est_ukf[1]
-            if np.isnan(estimated_rad_j2_mu):
-                print("Warning: Posterior estimated_rad_j2_mu is NaN in update_process_noise. Using default Q_ukf.")
-                self.Q_ukf = np.diag(default_Q_ukf_diag)
-                return
-            
-            I_j1_est_mu, _, I_j2_est_mu, _ = self.calculate_moments_of_inertia(
-                rad_j2_input_mu=estimated_rad_j2_mu, 
-                rad_j2_input_sigma=0.0
-            )
-        except (ValueError, IndexError) as e:
-            # print(f"Warning: Error calculating estimated MOI ({e}) in update_process_noise. Using default Q_ukf.")
-            self.Q_ukf = np.diag(default_Q_ukf_diag)
-            raise ValueError(f"Error calculating estimated MOI ({e}) in update_process_noise.")
-            # return
-
-        if np.isnan(I_j1_est_mu) or I_j1_est_mu <= 1e-9 or \
-           np.isnan(I_j2_est_mu) or I_j2_est_mu <= 1e-9:
-            # print(f"Warning: Invalid estimated inertias (I_j1_est_mu={I_j1_est_mu}, I_j2_est_mu={I_j2_est_mu}) in update_process_noise. Using default Q_ukf.")
-            self.Q_ukf = np.diag(default_Q_ukf_diag)
-            raise ValueError(f"Invalid estimated inertias (I_j1_est_mu={I_j1_est_mu}, I_j2_est_mu={I_j2_est_mu}) in update_process_noise.")
-            # return
-
-        # self.torque_jX_sigma_scaled is sqrt(PSD of torque noise Q_c_torque).
-        # It's based on the efferent torque from the *previous* step's calculation.
-        # Total torque noise power (efferent + external)
-        q_c_torque_j1 = self.torque_j1_sigma_scaled**2 + self.ukf_external_force_noise_sigma**2
-        q_c_torque_j2 = self.torque_j2_sigma_scaled**2 + self.ukf_external_force_noise_sigma**2
-
-
-        # PSD of continuous angular acceleration noise: Q_c_alpha = Q_c_torque / I_estimated^2
-        q_c_alpha_j1 = q_c_torque_j1 / (I_j1_est_mu**2)
-        q_c_alpha_j2 = q_c_torque_j2 / (I_j2_est_mu**2)
-
-        dt = self.dt
-        dt2 = dt**2
-        dt3 = dt**3 
-
-        # Variances for discrete process noise components
-        # Var(pos_noise) = (1/3) * Q_c_alpha * dt^3
-        # Var(vel_noise) = Q_c_alpha * dt
-        # State vector: [rad_j1, rad_j2, omega_j1, omega_j2]
-        
-        q_rad_j1_calc = (1/3) * q_c_alpha_j1 * dt3
-        q_rad_j2_calc = (1/3) * q_c_alpha_j2 * dt3
-        q_omega_j1_calc = q_c_alpha_j1 * dt
-        q_omega_j2_calc = q_c_alpha_j2 * dt
-
-        # Ensure calculated noise is not less than the minimum configured noise (from default_Q_ukf_diag).
-        # This acts as a floor and uses the default if calculated values are smaller (e.g., if torque_sigma_scaled is zero).
-        # q_rad_j1_final = max(q_rad_j1_calc, default_Q_ukf_diag[0])
-        # q_rad_j2_final = max(q_rad_j2_calc, default_Q_ukf_diag[1])
-        # q_omega_j1_final = max(q_omega_j1_calc, default_Q_ukf_diag[2])
-        # q_omega_j2_final = max(q_omega_j2_calc, default_Q_ukf_diag[3])
-        q_rad_j1_final = q_rad_j1_calc
-        q_rad_j2_final = q_rad_j2_calc
-        q_omega_j1_final = q_omega_j1_calc
-        q_omega_j2_final = q_omega_j2_calc
-        
-        # Build full Q for 6D state (if est_tau_ext) or 4D state (if not est_tau_ext)
-        # Use standard white-noise-acceleration (WNA) 2x2 blocks per joint:
-        # [[dt^3/3, dt^2/2], [dt^2/2, dt]] scaled by q_c_alpha for each joint.
-        # This introduces off-diagonal coupling between position and velocity.
-        q_cross_j1 = 0.5 * q_c_alpha_j1 * dt2
-        q_cross_j2 = 0.5 * q_c_alpha_j2 * dt2
-
-        # Initialize full matrix
-        self.Q_ukf = np.zeros((self.L_ukf, self.L_ukf))
-
-        # Joint 1 block: indices (0: rad_j1, 2: omega_j1)
-        self.Q_ukf[0, 0] = q_rad_j1_final
-        self.Q_ukf[2, 2] = q_omega_j1_final
-        self.Q_ukf[0, 2] = q_cross_j1
-        self.Q_ukf[2, 0] = q_cross_j1
-
-        # Joint 2 block: indices (1: rad_j2, 3: omega_j2)
-        self.Q_ukf[1, 1] = q_rad_j2_final
-        self.Q_ukf[3, 3] = q_omega_j2_final
-        self.Q_ukf[1, 3] = q_cross_j2
-        self.Q_ukf[3, 1] = q_cross_j2
-
-        if self.est_tau_ext:
-            q_tau_ext_var = (c.ukf_tau_ext_rw_sigma**2) * dt
-            # Disturbance torque random walks (no coupling assumed)
-            self.Q_ukf[4, 4] = q_tau_ext_var
-            self.Q_ukf[5, 5] = q_tau_ext_var
-
-        # If joint 1 is locked, suppress its process noise entirely (including off-diagonals)
-        if self.j1_locked:
-            # Zero out rows/cols for rad_j1 (0) and omega_j1 (2)
-            self.Q_ukf[0, :] = 0.0
-            self.Q_ukf[:, 0] = 0.0
-            self.Q_ukf[2, :] = 0.0
-            self.Q_ukf[:, 2] = 0.0
-            # Leave tiny diagonal noise to keep P well-conditioned
-            self.Q_ukf[0, 0] = 1e-12
-            self.Q_ukf[2, 2] = 1e-12
+    def calc_torques(self, current_state):
+        if self.use_receeding_horizon:
+            return self.get_trajectory_targets_oct_receeding_horizon(current_state=current_state)
+        else:
+            raise ValueError("Non-receeding horizon not yet implemented in calc_torques")
 
     def calculate_torques(self):
         """
@@ -1390,47 +690,6 @@ class Agent:
         else:
             return torque_j1_efferent, torque_j2_efferent
 
-    def motor_noise(self, torque_j1, torque_j2, sigma_j1_input, sigma_j2_input):
-        """
-        Applies motor noise to the calculated efferent torques.
-        Adds random noise (sampled from a normal distribution with `self.torque_j1/j2_sigma_scaled`)
-        to `self.torque_j1/j2_efferent`.
-        Returns zero torque if `self.time` is less than `self.min_time_before_movement`.
-
-        Args:
-            torque_j1 (float): The calculated efferent torque for j1.
-            torque_j2 (float): The calculated efferent torque for j2.
-            sigma_j1_input (float): The intensity (sqrt(PSD)) of continuous torque noise for j1 (sqrt(Q_c_torque)).
-            sigma_j2_input (float): The intensity (sqrt(PSD)) of continuous torque noise for j2 (sqrt(Q_c_torque)).
-
-        Returns:
-            tuple[float, float]: (noisy_torque_j1, noisy_torque_j2)
-        """
-        # Scale the input sigmas (which represent sqrt(Q_c_torque)) by 1/sqrt(dt)
-        # to get the std dev for the torque noise sample for this step dt.
-        sigma_j1_for_sampling = sigma_j1_input / np.sqrt(self.dt)
-        sigma_j2_for_sampling = sigma_j2_input / np.sqrt(self.dt)
-        # apply motor bias if enabled. Positive torque is flexion direction, negative is extension direction.
-        if self.passive_movement:
-            return torque_j1, torque_j2
-
-        if torque_j1 < 0:
-            torque_j1 = torque_j1 * self.j1_motor_flexion_bias
-        elif torque_j1 > 0:
-            torque_j1 = torque_j1 * self.j1_motor_extension_bias
-
-        if torque_j2 < 0:
-            torque_j2 = torque_j2 * self.j2_motor_flexion_bias
-        elif torque_j2 > 0:
-            torque_j2 = torque_j2 * self.j2_motor_extension_bias
-
-        noisy_torque_j1 = torque_j1 + (self.rng.normal(0, sigma_j1_for_sampling) * self.apply_motor_noise)
-        noisy_torque_j2 = torque_j2 + (self.rng.normal(0, sigma_j2_for_sampling) * self.apply_motor_noise)
-
-        if self.time < self.min_time_before_movement:
-            return 0.0, 0.0
-        return noisy_torque_j1, noisy_torque_j2
-
     def check_target_reached(self): 
         """
         NOTE Currently uses true target values, skips any target state estimation.
@@ -1463,144 +722,6 @@ class Agent:
         # if (self.target_reached and self.self_terminate) or (self.time >= self.max_time_per_trial) or ((self.time >= self.planned_max_time_target + self.min_time_before_movement+0.1) and self.self_terminate):
         if (self.target_reached and self.self_terminate) or (self.time >= self.max_time_per_trial):
             self.trial_ended_by_agent = True
-
-    def rotate_visual_feedback(self, cartesian_position, rotate_around, angle):
-        """Rotates a 2D Cartesian position around a specified point by a given angle.
-
-        Args:
-            cartesian_position (np.ndarray): The [x, y] position to rotate.
-            rotate_around (np.ndarray): The [x, y] point to rotate around.
-            angle (float): The rotation angle in radians (counter-clockwise).
-
-        Returns:
-            np.ndarray: The rotated [x, y] position.
-        """
-        # If angle is zero, no rotation needed
-        if angle == 0 or not self.visual_intervention_bool:
-            return cartesian_position
-
-        # Translate point so rotation center is origin
-        vec = cartesian_position - rotate_around
-
-        # If the point is the same as the rotation center, rotation has no effect
-        if np.linalg.norm(vec) < 1e-9: # Use tolerance for floating point comparison
-             return cartesian_position # Same as rotate_around
-
-        # Apply 2D rotation matrix
-        cos_a = np.cos(angle)
-        sin_a = np.sin(angle)
-        rotated_vec_x = vec[0] * cos_a - vec[1] * sin_a
-        rotated_vec_y = vec[0] * sin_a + vec[1] * cos_a
-        rotated_vec = np.array([rotated_vec_x, rotated_vec_y])
-
-        # Translate point back
-        rotated_position = rotated_vec + rotate_around
-
-        return rotated_position
-
-    def update_visual_and_proprioceptive_representations(self):
-        """
-        Updates the agent's internal representations of visual and proprioceptive feedback for the current step.
-        This includes applying any defined interventions (offsets, rotations) to the true sensory information.
-        Sets `self.vis_p_hand`, `self.prop_omega_j2`, `self.prop_omega_j1`, `self.prop_rad_j2`,
-        and `self.prop_rad_j1` based on true values and active interventions.
-        """
-        self.visual_feedback = self.visual_feedback_all_steps[self.step]
-        if self.visual_feedback_first_step and self.step == 0 and self.trial == 0: # Ensures initial pos is well defined, mirroring setups where visual feedback is provided pruir to trial start
-            self.visual_feedback = True
-
-        self.visual_intervention_bool = self.visual_intervention_bool_all_steps[self.step]
-
-        self.proprioceptive_intervention_bool = self.proprioceptive_intervention_bool_all_steps[self.step]
-
-        self.proprioceptive_feedback_rad = self.proprioceptive_feedback_rad_all_steps[self.step]
-        self.proprioceptive_feedback_omega = self.proprioceptive_feedback_omega_all_steps[self.step]
-
-        self.special_interventions() # for controlling onset of interventions that are not handled by the general interventions.
-        
-        self.vis_p_hand = self.rotate_visual_feedback(self.p_hand, self.visual_intervention_rotate_around, self.visual_feedback_rotation) + self.visual_offset * self.visual_intervention_bool
-        self.vis_hand_j1, self.vis_hand_j2, _ = self.inverse_kinematics(self.vis_p_hand, clip_limits=True, true_physics=False)
-
-        
-        self.prop_omega_j2 = self.omega_j2 + ((self.proprioceptive_offset_omega_j2) + ((self.proprioceptive_multiplier_omega_j2 * self.omega_j2) - self.omega_j2)) * self.proprioceptive_intervention_bool
-        self.prop_omega_j1 = self.omega_j1 + ((self.proprioceptive_offset_omega_j1) + ((self.proprioceptive_multiplier_omega_j1 * self.omega_j1) - self.omega_j1)) * self.proprioceptive_intervention_bool
-        self.prop_rad_j2 = self.rad_j2 + self.proprioceptive_offset_rad_j2 * self.proprioceptive_intervention_bool
-        self.prop_rad_j1 = self.rad_j1 + self.proprioceptive_offset_rad_j1 * self.proprioceptive_intervention_bool
-
-    def special_interventions(self):
-        """
-        For mimicking specific interventions that are not handled by the general interventions.
-        """
-        if self.task_type == "fournerett1997" and self.p_hand[1] > self.visual_intervention_bool_onset:
-            self.visual_intervention_bool = True
-            if self.visual_intervention_rotate_around is None:
-                self.visual_intervention_rotate_around = self.p_hand
-        
-        if self.task_type == "cody1990":
-            if self.rad_j2 <= self.proprioceptive_intervention_on_angle_rad:
-                self.proprioceptive_intervention_bool = True
-            else:
-                self.proprioceptive_intervention_bool = False
-
-        if self.task_type == "seq_reaching":
-            self.visual_intervention_rotate_around = self.p_hand_init
-        # Visual feedback from 10 cm from start in y direction, for 0.1 seconds
-        if self.task_type == "kordingwolpert2004" or (self.task_type == "seq_reaching" and self.trial == 0):
-            if self.p_hand[1] - self.p_hand_init[1] >= self.visual_feedback_bool_onset:
-                if self.visual_feedback_bool_onset_time is None:
-                    self.visual_feedback_bool_onset_time = self.time
-                if self.time < self.visual_feedback_bool_onset_time + self.visual_feedback_duration:
-                    self.visual_feedback = True
-
-                else:
-                    self.visual_feedback = False
-            else:
-                self.visual_feedback = False
-
-        if self.task_type == "roll1982":
-            if ((self.time >= 4.0 and self.time < 5.0) or 
-            (self.time >= 9.0 and self.time < 10.0) or 
-            (self.time >= 14.0 and self.time < 15.0)):
-                self.proprioceptive_intervention_bool = True
-                self.ukf_external_force_noise_sigma = c.ukf_external_force_noise_sigma
-            else:
-                self.proprioceptive_intervention_bool = False
-                self.ukf_external_force_noise_sigma = c.ukf_external_force_noise_sigma_concurrent_vib
-
-    def sample_proprioception(self):
-        """
-        Samples proprioceptive inputs (joint angles and velocities) if proprioceptive feedback is enabled.
-        Generates noisy samples (`_mu` suffixed variables) around the (potentially intervened) proprioceptive values
-        using their respective sigma values.
-        If feedback is disabled, sets sampled values to NaN.
-        """
-        if self.proprioceptive_feedback_rad:
-            self.prop_rad_j1_mu = self.prop_rad_j1 + (self.rng.normal(0, self.prop_rad_j1_sigma) * self.apply_proprioceptive_noise)
-            self.prop_rad_j2_mu = self.prop_rad_j2 + (self.rng.normal(0, self.prop_rad_j2_sigma) * self.apply_proprioceptive_noise)
-        else:
-            self.prop_rad_j1_mu = np.nan
-            self.prop_rad_j2_mu = np.nan
-
-        if self.proprioceptive_feedback_omega:
-            self.prop_omega_j1_mu = self.prop_omega_j1 + (self.rng.normal(0, self.prop_omega_j1_sigma) * self.apply_proprioceptive_noise)
-            self.prop_omega_j2_mu = self.prop_omega_j2 + (self.rng.normal(0, self.prop_omega_j2_sigma) * self.apply_proprioceptive_noise)
-        else:
-            self.prop_omega_j1_mu = np.nan
-            self.prop_omega_j2_mu = np.nan
-
-    def sample_visual(self):
-        """
-        Samples visual inputs for target position and hand position if visual feedback for the hand is enabled.
-        Generates noisy samples (`_mu` suffixed variables) around the (potentially intervened) visual values
-        using `self.vis_p_sigma`.
-        Target visual sample is always taken. Hand visual sample is NaN if feedback is disabled.
-        """
-        self.vis_p_target_mu = self.p_target + (self.rng.normal(0, self.vis_p_sigma, 2) * self.apply_visual_noise)
-
-        if self.visual_feedback:
-            self.vis_p_hand_mu = self.vis_p_hand + (self.rng.normal(0, self.vis_p_sigma, 2) * self.apply_visual_noise)
-        else:
-            self.vis_p_hand_mu = np.array([np.nan, np.nan]) 
 
     def calculate_acceleration_due_to_torque(self, torque_mu, inertia_mu, torque_sigma=0.0, inertia_sigma=0.0):
         """Calculates mean and sigma of angular acceleration due to a torque, considering uncertainty in both.
@@ -1719,16 +840,10 @@ class Agent:
                 torque_mu = 0.0
             
             elif joint_index == 1: # J2: Shoulder flexion/extension in the arm's vertical plane
-                if true_physics:
-                    L1 = self.true_len_upper_arm
-                    L2 = self.true_len_lower_arm
-                    m1 = self.true_m_upper_arm
-                    m2 = self.true_m_lower_arm
-                else:
-                    L1 = self.belief_len_upper_arm
-                    L2 = self.belief_len_lower_arm
-                    m1 = self.belief_m_upper_arm
-                    m2 = self.belief_m_lower_arm
+                L1 = self.true_len_upper_arm
+                L2 = self.true_len_lower_arm
+                m1 = self.true_m_upper_arm
+                m2 = self.true_m_lower_arm
                 z_s = self.p_shoulder_z
                 rad_j2_flex = current_rad_j2 # Use passed parameter current_rad_j2
 
@@ -1849,12 +964,8 @@ class Agent:
             ValueError: If calculated hand or j2 positions are NaN.
         """
         # Using lengths in meters for calculation, assuming p_elbow/p_hand should be in meters
-        if true_physics:
-            L1 = self.true_len_upper_arm
-            L2 = self.true_len_lower_arm
-        else:
-            L1 = self.belief_len_upper_arm
-            L2 = self.belief_len_lower_arm
+        L1 = self.true_len_upper_arm
+        L2 = self.true_len_lower_arm
 
         # j2 position (relative to j1 at [0,0])
         j2_x = L1 * np.cos(rad_j1)
@@ -1884,12 +995,8 @@ class Agent:
             rad_j1 (float): j1 angle in radians (internal/external rotation of the shoulder).
             rad_j2 (float): j2 angle in radians (shoulder flexion/extension in the vertical plane of the arm).
         """
-        if true_physics:
-            L1 = self.true_len_upper_arm
-            L2 = self.true_len_lower_arm
-        else:
-            L1 = self.belief_len_upper_arm
-            L2 = self.belief_len_lower_arm
+        L1 = self.true_len_upper_arm
+        L2 = self.true_len_lower_arm
 
         # Side view calculations (local XZ plane of the arm, before j1 rotation)
         # shoulder_x_local = 0 for this side view projection.
@@ -1965,7 +1072,7 @@ class Agent:
         else:
             return self._inverse_kinematics_elbow_out(cartesian_position, clip_limits, p_shoulder_arg=p_shoulder_arg, true_physics=true_physics)
 
-    def _inverse_kinematics_elbow_out(self, cartesian_position, clip_limits=False, p_shoulder_arg=None, true_physics=False):
+    def _inverse_kinematics_elbow_out(self, cartesian_position, clip_limits=False, p_shoulder_arg=None, true_physics=True):
         """Calculate inverse kinematics for 2-joint planar arm.
 
         Given a target position in 2D cartesian coordinates, calculates the required j1 and j2 angles
@@ -1992,13 +1099,9 @@ class Agent:
             raise ValueError(f"Target position is NaN: {cartesian_position}")
         
         # Select arm lengths based on true_physics flag
-        if true_physics:
-            L1 = self.true_len_upper_arm
-            L2 = self.true_len_lower_arm
-        else:
-            L1 = self.belief_len_upper_arm
-            L2 = self.belief_len_lower_arm
-
+        L1 = self.true_len_upper_arm
+        L2 = self.true_len_lower_arm
+        
         cartesian_position_relative = cartesian_position - p_shoulder_to_use
         x, y = cartesian_position_relative
         r = np.linalg.norm(cartesian_position_relative)
@@ -2095,13 +1198,9 @@ class Agent:
             # This check is good, but to make it more verbose for debugging:
             print(f"DEBUG IK_elbow_down: p_shoulder_to_use is NaN. p_shoulder_arg={p_shoulder_arg}, self.p_shoulder={self.p_shoulder}")
             raise ValueError(f"Shoulder position is NaN in _inverse_kinematics_elbow_down: {p_shoulder_to_use}")
+        L1 = self.true_len_upper_arm
+        L2 = self.true_len_lower_arm
 
-        if true_physics:
-            L1 = self.true_len_upper_arm
-            L2 = self.true_len_lower_arm
-        else:
-            L1 = self.belief_len_upper_arm
-            L2 = self.belief_len_lower_arm
         p_shoulder_xy = p_shoulder_to_use # Use the determined shoulder position
         z_s = self.p_shoulder_z # Height of shoulder above the table
 
@@ -2265,10 +1364,10 @@ class Agent:
         Returns:
             tuple: (I_j1, I_j2) or (np.nan, np.nan) if unreachable.
         """
-        L1 = self.belief_len_upper_arm
-        L2 = self.belief_len_lower_arm
-        m1 = self.belief_m_upper_arm
-        m2 = self.belief_m_lower_arm
+        L1 = self.true_len_upper_arm
+        L2 = self.true_len_lower_arm
+        m1 = self.true_m_upper_arm
+        m2 = self.true_m_lower_arm
         z_s = self.p_shoulder_z
 
         if np.isnan(rad_j2_shoulder_flexion_angle):
@@ -2323,10 +1422,10 @@ class Agent:
         Returns:
             tuple: (I_j1_mu, I_j1_sigma, I_j2_mu, I_j2_sigma) in kg*m^2
         """
-        m1 = self.belief_m_upper_arm
-        m2 = self.belief_m_lower_arm
-        L1 = self.belief_len_upper_arm
-        L2 = self.belief_len_lower_arm
+        m1 = self.true_m_upper_arm
+        m2 = self.true_m_lower_arm
+        L1 = self.true_len_upper_arm
+        L2 = self.true_len_lower_arm
         
         # I_j2 is constant for elbow_out configuration as it's defined as rotation of forearm about elbow.
         I_j2_mu = (1/3) * m2 * L2**2
@@ -2370,42 +1469,6 @@ class Agent:
 
         return I_j1_mu, I_j1_sigma, I_j2_mu, I_j2_sigma
 
-    def _ukf_state_transition(self, current_state_sigma_point, torque_j1_efferent, torque_j2_efferent):
-        """
-        Predicts the next state for a single sigma point given current state and motor commands.
-        This is the state transition function f(x, u).
-
-        Args:
-            current_state_sigma_point (np.ndarray): A 1D array [rad_j1, rad_j2, omega_j1, omega_j2].
-            torque_j1_efferent (float): Commanded torque for J1.
-            torque_j2_efferent (float): Commanded torque for J2.
-
-        Returns:
-            np.ndarray: The predicted next state [next_rad_j1, next_rad_j2, next_omega_j1, next_omega_j2].
-        """
-        # Unpack joint states and disturbance torques
-        rad_j1_k, rad_j2_k, omega_j1_k, omega_j2_k = current_state_sigma_point[:4]
-        if self.est_tau_ext:
-            tau_ext_j1_k = current_state_sigma_point[4]
-            tau_ext_j2_k = current_state_sigma_point[5]
-        else:
-            tau_ext_j1_k = 0.0
-            tau_ext_j2_k = 0.0
-
-        # Total torques = efferent + estimated disturbance
-        torque_j1_total = torque_j1_efferent + tau_ext_j1_k
-        torque_j2_total = torque_j2_efferent + tau_ext_j2_k
-
-        next_rad_j1, next_rad_j2, next_omega_j1, next_omega_j2, _, _ = self.update_joint_kinematics(
-            rad_j1_k, rad_j2_k, omega_j1_k, omega_j2_k, torque_j1_total, torque_j2_total, true_physics=False
-        )
-
-        # Disturbance torques follow a random walk; mean propagation is identity
-        next_tau_ext_j1 = tau_ext_j1_k
-        next_tau_ext_j2 = tau_ext_j2_k
-
-        return np.array([next_rad_j1, next_rad_j2, next_omega_j1, next_omega_j2, next_tau_ext_j1, next_tau_ext_j2])[:self.L_ukf]
-
     def update_joint_kinematics(self, rad_j1_k, rad_j2_k, omega_j1_k, omega_j2_k, torque_j1_efferent, torque_j2_efferent, true_physics=False):
         """
         Updates the joint kinematics based on the current state and motor commands.
@@ -2426,17 +1489,11 @@ class Agent:
         """
         if np.isnan(rad_j2):
             return np.full((2, 2), np.nan)
-
-        if true_physics:
-            m1 = self.true_m_upper_arm
-            m2 = self.true_m_lower_arm
-            L1 = self.true_len_upper_arm
-            L2 = self.true_len_lower_arm
-        else:
-            m1 = self.belief_m_upper_arm
-            m2 = self.belief_m_lower_arm
-            L1 = self.belief_len_upper_arm
-            L2 = self.belief_len_lower_arm
+        L1 = self.true_len_upper_arm
+        L2 = self.true_len_lower_arm
+        m1 = self.true_m_upper_arm
+        m2 = self.true_m_lower_arm
+        
         lc1 = L1 / 2.0
         lc2 = L2 / 2.0
         I1_com = (1/12.0) * m1 * L1**2
@@ -2467,15 +1524,10 @@ class Agent:
         """
         if np.isnan(rad_j2) or np.isnan(omega_j1) or np.isnan(omega_j2):
             return np.full(2, np.nan)
+        m2 = self.true_m_lower_arm
+        L1 = self.true_len_upper_arm
+        lc2 = self.true_len_lower_arm / 2.0
 
-        if true_physics:
-            m2 = self.true_m_lower_arm
-            L1 = self.true_len_upper_arm
-            lc2 = self.true_len_lower_arm / 2.0
-        else:
-            m2 = self.belief_m_lower_arm
-            L1 = self.belief_len_upper_arm
-            lc2 = self.belief_len_lower_arm / 2.0
         s2 = np.sin(rad_j2)
 
         h = -m2 * L1 * lc2 * s2
@@ -2610,344 +1662,10 @@ class Agent:
             torques = J.T @ force
             return torques
 
-    def ukf_predict(self, torque_j1_efferent, torque_j2_efferent):
-        """
-        Performs the UKF prediction step (time update).
-        Projects the state and covariance ahead in time.
-        Updates self.x_pred_ukf and self.P_pred_ukf.
-        """
-        if self.passive_movement:
-            torque_j1_efferent = 0.0
-            torque_j2_efferent = 0.0
-
-            
-        # 1. Generate sigma points from current estimate x_est_ukf and P_ukf
-        # self.sigmas_ukf has shape (L, 2*L+1)
-        current_sigmas = self.generate_sigma_points(self.x_est_ukf, self.P_ukf)
-        if current_sigmas is None:
-            raise ValueError("Error: Sigma point generation failed in ukf_predict. Cannot proceed.")
-        # 2. Propagate sigma points through the state transition function (Eq. \ref{eq:predictX})
-        # self.sigmas_f_ukf will store these: (L x num_sigma_points)
-        sigmas_f_k = np.zeros((self.L_ukf, self.n_sigma_points))
-        for i in range(self.n_sigma_points):
-            sigma_point_col = current_sigmas[:, i]
-            sigmas_f_k[:, i] = self._ukf_state_transition(sigma_point_col, torque_j1_efferent, torque_j2_efferent)
-        
-        if self.j1_locked:
-            sigmas_f_k[0, :] = self.j1_locked_angle_rad
-            sigmas_f_k[2, :] = 0.0
-        
-        self.sigmas_f_ukf = sigmas_f_k # Store for use in update step
-
-        # 3. Calculate predicted state mean (a priori state estimate) 
-        # Use circular mean for angles and linear mean for velocities
-        x_pred_ukf = np.zeros(self.L_ukf)
-        x_pred_ukf[0] = self._weighted_circular_mean(self.sigmas_f_ukf[0, :], self.W_m_ukf)
-        x_pred_ukf[1] = self._weighted_circular_mean(self.sigmas_f_ukf[1, :], self.W_m_ukf)
-        # Linear components (omega1, omega2, tau_ext_j1, tau_ext_j2)
-        x_pred_ukf[2:] = np.dot(self.sigmas_f_ukf[2:, :], self.W_m_ukf)
-
-
-        P_pred_ukf = np.zeros((self.L_ukf, self.L_ukf))
-        for i in range(self.n_sigma_points):
-            y = self.sigmas_f_ukf[:, i] - x_pred_ukf
-            y[0] = self._wrap_angle(y[0]) # Wrap j1 angle difference
-            y[1] = self._wrap_angle(y[1]) # Wrap j2 angle difference
-            P_pred_ukf += self.W_c_ukf[i] * np.outer(y, y)
-        P_pred_ukf += self.Q_ukf # Add process noise
-
-        self.x_pred_ukf = x_pred_ukf
-        self.P_pred_ukf = P_pred_ukf
-
-        # Calculate and store predicted visual output based on x_pred_ukf
-        try:
-            # x_pred_ukf is [rad_j1, rad_j2, omega_j1, omega_j2, tau_ext_j1, tau_ext_j2]
-            pred_rad_j1 = self.x_pred_ukf[0]
-            pred_rad_j2 = self.x_pred_ukf[1]
-            # Forward kinematics returns p_elbow, p_hand
-            _, p_hand_predicted_from_x_pred = self.forward_kinematics(pred_rad_j1, pred_rad_j2)
-            self.z_pred_visual_ukf = p_hand_predicted_from_x_pred # Expected to be a (2,) array [x, y]
-            if np.isnan(self.z_pred_visual_ukf).any():
-                 raise ValueError(f"Forward kinematics from x_pred_ukf {self.x_pred_ukf} resulted in NaN predicted visual input: {self.z_pred_visual_ukf}")
-        except ValueError as e:
-            # This implies x_pred_ukf might be in an invalid state for FK
-            self.z_pred_visual_ukf = np.array([np.nan, np.nan]) # Set to NaN if calculation fails
-            raise ValueError(f"Failed to compute z_pred_visual_ukf from x_pred_ukf {self.x_pred_ukf}. FK Error: {e}")
-
-        # self.x_est_ukf and self.P_ukf will be updated in the ukf_update step
-
-    def _ukf_measurement_model(self, state_sigma_point):
-        """
-        Transforms a predicted state sigma point into the measurement space.
-        This is the measurement function h(x).
-
-        Args:
-            state_sigma_point (np.ndarray): A 1D array [rad_j1, rad_j2, omega_j1, omega_j2]
-                                            representing a predicted state.
-
-        Returns:
-            np.ndarray: The predicted measurement vector 
-                        [vis_x, vis_y, prop_rad1, prop_rad2, prop_omega1, prop_omega2].
-                        Returns NaNs if forward kinematics fails.
-        """
-        # Eq. \ref{eq:FK} and Eq. \ref{eq:measurement}: visual via FK(q), proprio direct from state
-        rad_j1_k, rad_j2_k, omega_j1_k, omega_j2_k = state_sigma_point[:4]
-
-        # 1. Calculate visual components (hand position) using forward kinematics
-        # forward_kinematics returns p_elbow, p_hand
-        _, p_hand_k = self.forward_kinematics(rad_j1_k, rad_j2_k)
-        vis_x_k = p_hand_k[0]
-        vis_y_k = p_hand_k[1]
-        
-        if np.isnan(vis_x_k) or np.isnan(vis_y_k):
-            raise ValueError(f"NaN visual measurement ({vis_x_k}, {vis_y_k}) for state {state_sigma_point}.")
-
-        # 2. Proprioceptive components are directly from the state
-        prop_rad_j1_k = rad_j1_k
-        prop_rad_j2_k = rad_j2_k
-        prop_omega_j1_k = omega_j1_k
-        prop_omega_j2_k = omega_j2_k
-
-        # 3. Assemble the predicted measurement vector
-        predicted_measurement = np.array([
-            vis_x_k, vis_y_k,
-            prop_rad_j1_k, prop_rad_j2_k,
-            prop_omega_j1_k, prop_omega_j2_k
-        ])
-        return predicted_measurement
-
     @staticmethod
     def _wrap_angle(angle):
         """Wraps angle to the range [-pi, pi]."""
         return (angle + np.pi) % (2 * np.pi) - np.pi
-
-    def ukf_update(self):
-        """
-        Performs the UKF update step (measurement update).
-        Corrects the a priori state estimate using the actual measurement.
-        Updates self.x_est_ukf and self.P_ukf with a posteriori estimates.
-
-        Args:
-            z_measurement (np.ndarray): The actual measurement vector (6x1), 
-                                        with NaNs for unavailable measurements.
-        """
-        # 0. Sample the measurements first, as they are needed for all paths.
-        self.z_ukf = self._ukf_measurement()
-
-
-        prop_rad_indices = {2, 3}  # Indices in the FULL measurement vector
-
-        # 1. Identify available measurements (Eq. \ref{eq:Ztransform})
-        # Ensure z_measurement is a flat array for isnan and boolean indexing
-        z_flat = self.z_ukf.flatten()
-        available_mask = ~np.isnan(z_flat)
-        available_indices = np.nonzero(available_mask)[0]
-        z_avail = z_flat[available_mask]
-        num_avail_measurements = len(z_avail)
-
-        if num_avail_measurements == 0:
-            # No measurements available, so a posteriori estimate is the a priori estimate
-            self.x_est_ukf = np.copy(self.x_pred_ukf) # Ensure it's a copy
-            self.P_ukf = np.copy(self.P_pred_ukf)   # Ensure it's a copy
-            # Reset surprise metrics as no innovation to assess
-            self.normalized_innovation_ukf.fill(np.nan)
-            self.full_innovation_ukf.fill(np.nan)
-            self.diag_P_z_full_ukf = np.full(self.num_measurements_ukf, np.nan)
-            return
-
-        # 2. Transform predicted state sigma points (self.sigmas_f_ukf) to measurement space
-        sigmas_h_ukf = np.zeros((self.num_measurements_ukf, self.n_sigma_points))
-        for i in range(self.n_sigma_points):
-            sigmas_h_ukf[:, i] = self._ukf_measurement_model(self.sigmas_f_ukf[:, i])
-
-        # 3. Filter for available measurements
-        sigmas_h_avail = sigmas_h_ukf[available_mask, :] 
-        
-        # Check if any of the sigma_h_avail rows (corresponding to available measurements) are all NaNs.
-        # This could happen if _ukf_measurement_model returned NaNs for all sigma points for a sensor that is marked as available.
-        if np.any(np.all(np.isnan(sigmas_h_avail), axis=1)):
-            self.x_est_ukf = np.copy(self.x_pred_ukf)
-            self.P_ukf = np.copy(self.P_pred_ukf)
-            # Reset surprise metrics if update cannot proceed reliably
-            # self.nis_ukf = np.nan # REMOVED
-            self.normalized_innovation_ukf.fill(np.nan)
-            self.full_innovation_ukf.fill(np.nan)
-            self.diag_P_z_full_ukf = np.full(self.num_measurements_ukf, np.nan)
-            raise ValueError("Critical Error: All predicted measurements for an available sensor are NaN. Review model or sigma points.")
-
-        # Calculate full predicted measurement mean (z_pred_full_mean) and full innovation covariance (P_z_pred_only_full)
-        # These are for diagnostic/surprise metrics and use all measurement dimensions, regardless of availability in this step.
-        z_pred_full_mean = np.dot(sigmas_h_ukf, self.W_m_ukf) # Mean of h(propagated sigma points)
-        
-        if np.isnan(z_pred_full_mean).any():
-            # This indicates a problem with _ukf_measurement_model for some sigma points.
-            # Full surprise metrics will be NaN.
-            self.full_innovation_ukf.fill(np.nan)
-            self.diag_P_z_full_ukf = np.full(self.num_measurements_ukf, np.nan)
-            # nis_ukf might still be calculable if z_pred_avail is fine.
-            # print("Warning: z_pred_full_mean contains NaNs. Full surprise metrics will be NaN.")
-        else:
-            self.full_innovation_ukf = self.z_ukf.flatten() - z_pred_full_mean
-
-            P_z_pred_only_full = np.zeros((self.num_measurements_ukf, self.num_measurements_ukf))
-            valid_sigma_points_for_full_Pz = 0
-            for i in range(self.n_sigma_points):
-                diff_z_full = sigmas_h_ukf[:, i] - z_pred_full_mean
-                if np.isnan(diff_z_full).any(): # Skip if any component of this transformed sigma point is NaN
-                    # print(f"Debug: NaN in sigmas_h_ukf[:, {i}] or z_pred_full_mean, skipping for P_z_pred_only_full component.")
-                    continue
-                P_z_pred_only_full += self.W_c_ukf[i] * np.outer(diff_z_full, diff_z_full)
-                valid_sigma_points_for_full_Pz +=1
-            
-            if valid_sigma_points_for_full_Pz < self.n_sigma_points:
-                # print(f"Warning: Only {valid_sigma_points_for_full_Pz}/{num_sigma_points} sigma points were valid for P_z_pred_only_full calculation.")
-                pass # Decide if this needs more robust handling, e.g., re-weighting or erroring.
-
-            if np.isnan(P_z_pred_only_full).any():
-                self.diag_P_z_full_ukf = np.full(self.num_measurements_ukf, np.nan)
-                # print("Warning: P_z_pred_only_full contains NaNs after accumulation. diag_P_z_full_ukf will be NaN.")
-            else:
-                # Add measurement noise R_ukf to get the full innovation covariance S_full
-                S_full = P_z_pred_only_full + self.R_ukf 
-                self.diag_P_z_full_ukf = np.diag(S_full)
-                if np.isnan(self.diag_P_z_full_ukf).any():
-                    pass 
-
-        R_avail = self.R_ukf[np.ix_(available_mask, available_mask)] # Correct way to select submatrix
-
-        # 4. Calculate mean predicted available measurement (z_pred_avail) (Eq. \ref{eq:Ztransform})
-        z_pred_avail = np.zeros(num_avail_measurements)
-        for i, full_idx in enumerate(available_indices):
-            if full_idx in prop_rad_indices:
-                z_pred_avail[i] = self._weighted_circular_mean(sigmas_h_avail[i, :], self.W_m_ukf)
-            else:
-                z_pred_avail[i] = np.dot(sigmas_h_avail[i, :], self.W_m_ukf)
-
-        # 5. Calculate predicted measurement covariance (P_z_avail) (Eq. \ref{eq:S})
-        P_z_avail = np.zeros((num_avail_measurements, num_avail_measurements))
-        for i in range(self.n_sigma_points):
-            # If a transformed measurement was NaN, skip it.
-            if np.isnan(sigmas_h_avail[:, i]).any():
-                continue
-            diff_z = sigmas_h_avail[:, i] - z_pred_avail
-            # Wrap angular components of diff_z
-            for k, full_idx in enumerate(available_indices):
-                if full_idx in prop_rad_indices:
-                    diff_z[k] = self._wrap_angle(diff_z[k])
-            P_z_avail += self.W_c_ukf[i] * np.outer(diff_z, diff_z)
-        P_z_avail += R_avail # Add measurement noise
-
-        # 6. Calculate state-measurement cross-covariance (P_xz_avail) (Eq. \ref{eq:Pxz})
-        P_xz_avail = np.zeros((self.L_ukf, num_avail_measurements))
-        for i in range(self.n_sigma_points):
-            # Use the same logic: if the transformed measurement for this sigma point was NaN, skip it.
-            if np.isnan(sigmas_h_avail[:, i]).any():
-                continue
-            diff_x = self.sigmas_f_ukf[:, i] - self.x_pred_ukf
-            diff_x[0] = self._wrap_angle(diff_x[0])
-            diff_x[1] = self._wrap_angle(diff_x[1])
-            
-            diff_z = sigmas_h_avail[:, i] - z_pred_avail # Recalculate or ensure this diff_z is from non-NaN point
-            # Wrap angular components of diff_z 
-            for k, full_idx in enumerate(available_indices):
-                if full_idx in prop_rad_indices:
-                    diff_z[k] = self._wrap_angle(diff_z[k])
-            P_xz_avail += self.W_c_ukf[i] * np.outer(diff_x, diff_z)
-        
-        if np.isnan(P_xz_avail).any():
-            raise ValueError("P_xz_avail contains NaNs. Check sigma point propagation or _ukf_measurement_model results.")
-
-        # 7. Calculate Kalman Gain (K_ukf) (Eq. \ref{eq:K})
-        try:
-            # Using pseudo-inverse for numerical stability if P_z_avail is singular or ill-conditioned
-            P_z_inv = np.linalg.pinv(P_z_avail)
-            K_ukf = P_xz_avail @ P_z_inv
-        except np.linalg.LinAlgError as e:
-            raise ValueError(f"Matrix inversion failed for Kalman gain (P_z_avail likely singular or ill-conditioned). Error: {e}")
-        
-        if np.isnan(K_ukf).any():
-            raise ValueError("Kalman Gain K_ukf contains NaNs. Problem in P_xz_avail or P_z_inv.")
-
-        if self.j1_locked:
-            K_ukf[0, :] = 0.0 # Zero out gain for rad_j1
-            K_ukf[2, :] = 0.0 # Zero out gain for omega_j1
-
-        # Conditionally ignore visual innovation by zeroing out the corresponding Kalman gain columns
-        if not self.apply_visual_innovation:
-            vis_indices = [0, 1]  # Indices for visual feedback (x, y) in the full measurement vector
-            for i, full_idx in enumerate(available_indices):
-                if full_idx in vis_indices:
-                    K_ukf[:, i] = 0.0
-
-        # 8. Update state estimate (a posteriori state estimate) (Eq. \ref{eq:updateX})
-        innovation = z_avail - z_pred_avail # z_avail is already 1D
-
-        # Wrap angular innovations to the range [-pi, pi]
-        # Proprioceptive angle measurements are at indices 2 and 3 in the full measurement vector
-        for i, full_idx in enumerate(available_indices):
-            if full_idx in prop_rad_indices:
-                innovation[i] = self._wrap_angle(innovation[i])
-                
-        self.x_est_ukf = self.x_pred_ukf + K_ukf @ innovation
-
-        # Standard UKF covariance update (Eq. \ref{eq:updateP})
-        P_ukf_new = self.P_pred_ukf - K_ukf @ P_z_avail @ K_ukf.T
-
-        # Numerical safety: enforce symmetry and add tiny jitter if needed
-        P_ukf_new = 0.5 * (P_ukf_new + P_ukf_new.T)
-        eigvals = np.linalg.eigvalsh(P_ukf_new)
-        if np.min(eigvals) < 1e-12:
-            P_ukf_new += (1e-9 - np.min(eigvals)) * np.eye(self.L_ukf)
-
-        self.P_ukf = P_ukf_new
-
-        # Post-update checks for stability
-        self.P_ukf = (self.P_ukf + self.P_ukf.T) / 2 # Enforce symmetry
-
-        self.kalman_gain_ukf = K_ukf
-        self.innovation_ukf = innovation
-
-        # Save matrices for visual feedback impact analysis
-        self.K_ukf = K_ukf.copy() if not np.isnan(K_ukf).any() else np.full_like(K_ukf, np.nan)
-        self.P_xz_available = P_xz_avail.copy() if not np.isnan(P_xz_avail).any() else np.full_like(P_xz_avail, np.nan)
-        self.measurement_available_mask = available_mask.copy()
-        self.innovation_available = innovation.copy() if not np.isnan(innovation).any() else np.full_like(innovation, np.nan)
-
-        # Ensure diag_P_z_full_ukf is valid before proceeding. full_innovation_ukf may legitimately contain NaNs.
-        if np.isnan(self.diag_P_z_full_ukf).any():
-            self.normalized_innovation_ukf.fill(np.nan)
-            # print("Warning: diag_P_z_full_ukf contains NaNs. Cannot compute normalized_innovation_ukf.")
-        else:
-            variances = self.diag_P_z_full_ukf
-            # Replace any non-positive variances with a very small positive number before sqrt
-            # to prevent errors with sqrt(0) or sqrt(negative).
-            safe_variances = np.where(variances > 1e-12, variances, 1e-12)
-            std_devs = np.sqrt(safe_variances)
-            self.normalized_innovation_ukf = np.divide(
-                self.full_innovation_ukf, 
-                std_devs, 
-                out=np.full_like(self.full_innovation_ukf, np.nan), 
-                where=std_devs > 1e-9  
-            )
-
-        if np.isnan(self.x_est_ukf).any() or np.isnan(self.P_ukf).any():
-            raise ValueError("Critical Error: NaNs in final x_est_ukf or P_ukf after update step.")
-        
-        # Update Cartesian estimates from the posterior state 
-        self._propagate_posterior_to_cartesian_space() 
-
-    def _ukf_measurement(self):
-        """
-        Samples the visual and proprioceptive measurements, and assembles the measurement vector, z_measurement.
-        """
-        # Eq. \ref{eq:measurement}: assemble z_k = [vis_x, vis_y, q1, q2, dq1, dq2]^T
-        self.sample_visual()
-        self.sample_proprioception()
-        z_measurement = np.array([
-            self.vis_p_hand_mu[0], self.vis_p_hand_mu[1],
-            self.prop_rad_j1_mu, self.prop_rad_j2_mu,
-            self.prop_omega_j1_mu, self.prop_omega_j2_mu])
-        return z_measurement
 
     def calculate_jacobian(self, rad_j1, rad_j2, true_physics=False):
         """Calculates the Jacobian matrix for the forward kinematics.
@@ -2973,12 +1691,8 @@ class Agent:
         x_hand = p_shoulder_x + L1*cos(q1) + L2*cos(q1+q2)
         y_hand = p_shoulder_y + L1*sin(q1) + L2*sin(q1+q2)
         """
-        if true_physics:
-            L1 = self.true_len_upper_arm
-            L2 = self.true_len_lower_arm
-        else:
-            L1 = self.belief_len_upper_arm
-            L2 = self.belief_len_lower_arm
+        L1 = self.true_len_upper_arm
+        L2 = self.true_len_lower_arm
 
         s1 = np.sin(rad_j1)
         c1 = np.cos(rad_j1)
@@ -3062,12 +1776,8 @@ class Agent:
             return dJ_dq1 * omega_j1 + dJ_dq2 * omega_j2
 
         # Elbow_out closed-form
-        if true_physics:
-            L1 = self.true_len_upper_arm
-            L2 = self.true_len_lower_arm
-        else:
-            L1 = self.belief_len_upper_arm
-            L2 = self.belief_len_lower_arm
+        L1 = self.true_len_upper_arm
+        L2 = self.true_len_lower_arm
 
         s1 = np.sin(rad_j1)
         c1 = np.cos(rad_j1)
@@ -3088,107 +1798,8 @@ class Agent:
         J_dot[1, 1] = -L2 * s12 * w12
         return J_dot
 
-    def _ukf_joint_state_to_cartesian_state(self, joint_state_sigma_point):
-        """
-        Transforms a joint state sigma point [rad_j1, rad_j2, omega_j1, omega_j2]
-        to a Cartesian state sigma point [x_hand, y_hand, vx_hand, vy_hand, x_elbow, y_elbow].
 
-        Args:
-            joint_state_sigma_point (np.ndarray): A 4-element array representing a joint state.
-
-        Returns:
-            np.ndarray: A 6-element array representing the corresponding Cartesian state
-                        [x_hand, y_hand, vx_hand, vy_hand, x_elbow, y_elbow].
-        Raises:
-            ValueError: If forward kinematics or Jacobian calculation fails.
-        """
-        rad_j1, rad_j2, omega_j1, omega_j2 = joint_state_sigma_point[:4]
-
-        # Clip angles from the sigma point to be consistent with joint limits
-        # This ensures FK is evaluated on physically possible joint configurations according to the model
-        rad_j1_clipped = np.clip(rad_j1, self.lim_j1_min, self.lim_j1_max)
-        rad_j2_clipped = np.clip(rad_j2, self.lim_j2_min, self.lim_j2_max)
-
-        # Calculate Cartesian position for hand and elbow using clipped angles (Eq. \ref{eq:FK})
-        # FK already raises ValueError on failure
-        p_elbow, p_hand = self.forward_kinematics(rad_j1_clipped, rad_j2_clipped)
-        x_hand, y_hand = p_hand
-        x_elbow, y_elbow = p_elbow
-
-        # Calculate Cartesian velocity for hand
-
-        J_hand_at_clipped_state = self.calculate_jacobian(rad_j1_clipped, rad_j2_clipped, true_physics=False) 
-
-        current_J_hand = J_hand_at_clipped_state.copy()
-        # If rad_j1 was clipped, its effective derivative for velocity calculation is 0
-        if rad_j1 != rad_j1_clipped: # True if rad_j1 was outside limits
-            current_J_hand[:, 0] = 0.0
-        # If rad_j2 was clipped, its effective derivative for velocity calculation is 0
-        if rad_j2 != rad_j2_clipped: # True if rad_j2 was outside limits
-            current_J_hand[:, 1] = 0.0
-
-        vx_hand, vy_hand = current_J_hand @ np.array([omega_j1, omega_j2])
-        
-        cartesian_state = np.array([x_hand, y_hand, vx_hand, vy_hand, x_elbow, y_elbow])
-        if np.isnan(cartesian_state).any():
-            raise ValueError(f"NaN in transformed Cartesian state {cartesian_state} from joint state {joint_state_sigma_point}")
-        return cartesian_state
-
-    def _propagate_posterior_to_cartesian_space(self):
-        """
-        Propagates the posterior joint state estimate (self.x_est_ukf, self.P_ukf)
-        to Cartesian space using an Unscented Transform.
-        Updates self.x_est_cartesian_ukf and self.P_est_cartesian_ukf.
-        """
-        if self.x_est_ukf is None or self.P_ukf is None:
-            # This might happen if the first ukf_update hasn't completed successfully
-            # Or if the filter was just initialized and _ukf_update hasn't run.
-            self.x_est_cartesian_ukf = np.full(self.L_cart_ukf, np.nan)
-            self.P_est_cartesian_ukf = np.full((self.L_cart_ukf, self.L_cart_ukf), np.nan)
-            # print("Warning: Posterior joint state (x_est_ukf or P_ukf) is None. Cannot propagate to Cartesian space.")
-            return # Or raise an error if this state is unexpected
-
-        # 1. Generate sigma points from the posterior joint state
-        # generate_sigma_points uses self.L_ukf, self.lambda_ukf internally from joint state perspective
-        sigmas_joint_posterior = self.generate_sigma_points(self.x_est_ukf, self.P_ukf)
-        if sigmas_joint_posterior is None:
-            # Sigma point generation failed for joint posterior
-            self.x_est_cartesian_ukf = np.full(self.L_cart_ukf, np.nan)
-            self.P_est_cartesian_ukf = np.full((self.L_cart_ukf, self.L_cart_ukf), np.nan)
-            # raise ValueError("Failed to generate sigma points from posterior joint state for Cartesian propagation.")
-            print("Warning: Failed to generate sigma points from posterior joint state for Cartesian propagation.")
-
-        num_joint_sigma_points = 2 * self.L_ukf + 1
-        sigmas_cartesian_transformed = np.zeros((self.L_cart_ukf, num_joint_sigma_points))
-
-        # 2. Transform joint sigma points to Cartesian state sigma points
-        for i in range(num_joint_sigma_points):
-            try:
-                sigmas_cartesian_transformed[:, i] = self._ukf_joint_state_to_cartesian_state(sigmas_joint_posterior[:, i])
-            except ValueError as e:
-                # If transformation fails for any sigma point, we cannot reliably compute mean/cov for Cartesian state
-                self.x_est_cartesian_ukf = np.full(self.L_cart_ukf, np.nan)
-                self.P_est_cartesian_ukf = np.full((self.L_cart_ukf, self.L_cart_ukf), np.nan)
-                # raise ValueError(f"Error transforming joint sigma point {i} to Cartesian space: {e}")
-                print(f"Warning: Error transforming joint sigma point {i} to Cartesian space: {e}")
-        self.sigmas_cartesian_transformed = sigmas_cartesian_transformed
-        # 3. Calculate mean Cartesian state
-        self.x_est_cartesian_ukf = np.dot(sigmas_cartesian_transformed, self.W_m_ukf)
-
-        # 4. Calculate Cartesian state covariance
-        self.P_est_cartesian_ukf = np.zeros((self.L_cart_ukf, self.L_cart_ukf))
-        for i in range(num_joint_sigma_points):
-            diff = sigmas_cartesian_transformed[:, i] - self.x_est_cartesian_ukf
-            # W_c_ukf are also based on L_ukf
-            self.P_est_cartesian_ukf += self.W_c_ukf[i] * np.outer(diff, diff)
-            
-        # Ensure symmetry for the Cartesian covariance matrix
-        self.P_est_cartesian_ukf = (self.P_est_cartesian_ukf + self.P_est_cartesian_ukf.T) / 2.0
-
-        if np.isnan(self.x_est_cartesian_ukf).any() or np.isnan(self.P_est_cartesian_ukf).any():
-            raise ValueError("NaN in final x_est_cartesian_ukf or P_est_cartesian_ukf after propagation.")
-
-    def get_trajectory_targets_oct_receeding_horizon(self):
+    def get_trajectory_targets_oct_receeding_horizon(self, current_state):
         """
         Calculates the current target position and velocity based on a pre-computed optimal plan.
         If a plan does not exist, it generates one using an LQR-based optimal control solver.
@@ -3208,9 +1819,6 @@ class Agent:
 
         # target_state = np.array([self.rad_j1_target, self.rad_j2_target, 0.0, 0.0])
         target_state = np.array([self.rad_j1_target, self.rad_j2_target, self.omega_j1_target, self.omega_j2_target])
-        current_state = self.x_est_ukf[:4]
-        if self.passive_movement:
-            current_state = np.array([self.rad_j1, self.rad_j2, self.omega_j1, self.omega_j2])
     
         if remaining_time >= self.dt:
             self.planned_optimal_states, self.planned_optimal_torques = self._plan_optimal_trajectory(
@@ -3226,27 +1834,10 @@ class Agent:
             # Set the initial planned state and forward torque to 1nd index of the plan; torques control
             # where the agents wants to be at the next time step
             self.planned_state = self.planned_optimal_states[1] # next planned state
-            self.torque_j1_ff, self.torque_j2_ff = self.planned_optimal_torques[0]
-
-
-
-        elif remaining_time < self.dt:
-            self.planned_state = self.planned_optimal_states[-1] # set final target state
-            self.torque_j1_ff, self.torque_j2_ff = 0.0, 0.0 # no feedforward torque
-
-        # store planned trajectory position and velocity (Cartesian for plotting/analysis)
-        # This is not necessary for the controller, but is useful for plotting/analysis
-        try:
-            _, p_planned_cartesian = self.forward_kinematics(rad_j1=self.planned_state[0], rad_j2=self.planned_state[1])
-            self.p_planned_trajectory = p_planned_cartesian
-            
-            J_target_pos = self.calculate_jacobian(self.planned_state[0], self.planned_state[1]) 
-            vx_hand, vy_hand = J_target_pos @ self.planned_state[2:]
-            self.v_planned_trajectory = np.array([vx_hand, vy_hand])
-        except ValueError as e:
-            # print(f"Warning: FK or Jacobian failed in get_trajectory_targets_oct_receeding_horizon for planned path. {e}")
-            self.p_planned_trajectory = np.array([np.nan, np.nan])
-            self.v_planned_trajectory = np.array([np.nan, np.nan])
+            torque_j1, torque_j2 = self.planned_optimal_torques[0]
+            return torque_j1, torque_j2
+        else:
+            return 0.0, 0.0
 
     def get_trajectory_targets_oct_open_loop(self):
         """
@@ -3381,12 +1972,12 @@ class Agent:
 
         # Parameters
         # Use the same "belief" parameters as planning/dynamics
-        m2 = self.belief_m_lower_arm
-        L1 = self.belief_len_upper_arm
-        lc2 = self.belief_len_lower_arm / 2.0
+        m2 = self.true_m_lower_arm
+        L1 = self.true_len_upper_arm
+        lc2 = self.true_len_lower_arm / 2.0
 
         # Damping (always included in full dynamics)
-        D = np.diag([(self.damping_factor_j1+self.damping_factor_believed_offset_j1), (self.damping_factor_j2+self.damping_factor_believed_offset_j2)])
+        D = np.diag([(self.damping_factor_j1), (self.damping_factor_j2)])
 
         # Mass matrix and its inverse
         M = self._calculate_mass_matrix(q2, true_physics=False)
@@ -3500,7 +2091,7 @@ class Agent:
             q1, q2, w1, w2 = x[:4]
 
             # Coriolis/centrifugal
-            m2 = self.belief_m_lower_arm; L1 = self.belief_len_upper_arm; lc2 = self.belief_len_lower_arm / 2.0
+            m2 = self.true_m_lower_arm; L1 = self.true_len_upper_arm; lc2 = self.true_len_lower_arm / 2.0
             H = -m2 * L1 * lc2 * np.sin(q2)
             h = np.array([H * (2.0 * w1 * w2 + w2**2), H * (-w1**2)])
             # Viscous damping
@@ -3671,82 +2262,6 @@ class Agent:
 
         x_traj = [z[:n] for z in z_traj]
         return np.array(x_traj), np.array(u_traj)
-
-    def _calculate_external_torques_for_state(self, state_vector):
-        """
-        Calculates the combined external torques (Coriolis, gravity, damping) for a given state vector.
-        This is a helper for the Unscented Transform in _calculate_expected_external_torques_full.
-        
-        Args:
-            state_vector (np.ndarray): A 4-element array [rad_j1, rad_j2, omega_j1, omega_j2].
-
-        Returns:
-            np.ndarray: A 2-element array of the combined external torques [torque_j1, torque_j2].
-        """
-        rad_j1, rad_j2, omega_j1, omega_j2 = state_vector[:4]
-        
-        # Coriolis and Centrifugal Torques
-        C_vec = self._calculate_coriolis_vector(rad_j2, omega_j1, omega_j2)
-        if np.isnan(C_vec).any(): C_vec = np.zeros(2)
-
-        # Gravity Torques
-        G_vec = self._calculate_gravity_vector(rad_j1, rad_j2)
-        if np.isnan(G_vec).any(): G_vec = np.zeros(2)
-        
-        # Damping Torques
-        D_vec = np.zeros(2)
-        if self.dampen_torque:
-            D_vec[0] = -self.damping_factor_j1 * omega_j1
-            D_vec[1] = -self.damping_factor_j2 * omega_j2
-
-        # Total external torque to be counteracted
-        return C_vec + G_vec + D_vec
-
-    def _calculate_expected_external_torques_full(self):
-        """
-        Calculates expected external torques using the full dynamics model and an Unscented Transform
-        to properly propagate uncertainty from the posterior state estimate.
-        """
-        # 1. Generate sigma points from the posterior joint state
-        sigma_points = self.generate_sigma_points(self.x_est_ukf, self.P_ukf)
-        if sigma_points is None:
-            # Handle failure of sigma point generation
-            self.torque_j1_external_exp, self.torque_j2_external_exp = 0.0, 0.0
-            self.torque_j1_external_exp_sigma, self.torque_j2_external_exp_sigma = 0.0, 0.0
-            return
-
-        # 2. Propagate sigma points through the external torque function
-        num_sigma_points = sigma_points.shape[1]
-        torques_sigma_points = np.zeros((2, num_sigma_points)) # 2 torques, n sigma points
-        for i in range(num_sigma_points):
-            torques_sigma_points[:, i] = self._calculate_external_torques_for_state(sigma_points[:, i])
-
-        # 3. Calculate mean expected external torques
-        mean_torques = np.dot(torques_sigma_points, self.W_m_ukf)
-        self.torque_j1_external_exp, self.torque_j2_external_exp = mean_torques
-
-        # 4. Calculate covariance of the torques
-        torque_covariance = np.zeros((2, 2))
-        for i in range(num_sigma_points):
-            diff = torques_sigma_points[:, i] - mean_torques
-            torque_covariance += self.W_c_ukf[i] * np.outer(diff, diff)
-
-        # 5. Extract sigmas from the covariance matrix
-        var_j1 = torque_covariance[0, 0]
-        var_j2 = torque_covariance[1, 1]
-        self.torque_j1_external_exp_sigma = np.sqrt(max(0, var_j1))
-        self.torque_j2_external_exp_sigma = np.sqrt(max(0, var_j2))
-
-    def calculate_expected_external_torques(self):
-        """
-        Dispatcher to calculate expected external torques based on the selected dynamics model.
-        """
-        if np.isnan(self.x_est_ukf).any():
-            self.torque_j1_external_exp, self.torque_j2_external_exp = 0.0, 0.0
-            self.torque_j1_external_exp_sigma, self.torque_j2_external_exp_sigma = 0.0, 0.0
-            return
-
-        self._calculate_expected_external_torques_full()
 
     @staticmethod
     def _weighted_circular_mean(angles, weights):

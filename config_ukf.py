@@ -59,14 +59,16 @@ omega_j2_target_init = 0.0 # Initial angular velocity of hand in degrees/sec
 # Target settings
 use_optimal_control_planner = True
 planned_max_time_target = 1
+p_target_list = [[0.1, 0.1], [0.1, 0.2]]
 p_target_static = np.array([0.0, 0.38])
 p_target_odd = p_hand_init
 p_target_even = np.array([0.2, 0.3])
-task_type = 'repeated_reaching'
+task_type = 'seq_targets'
 task_types = [
+    'seq_targets',
     'j1_locked_reaching', 'repeated_reaching', 'circular_following', 
     'tapping', 'patterson2017', 'fournerett1997', 'maze_seq_reaching', 
-    'patterson2017_j1_locked','kordingwolpert2004', 'seq_reaching', 'roll1982'
+    'patterson2017_j1_locked','kordingwolpert2004', 'seq_reaching', 'roll1982' 
 ]
 r_target = 0.025
 v_target = np.array([0.0, 0.0])
