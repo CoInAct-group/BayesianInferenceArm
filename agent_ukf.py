@@ -625,7 +625,7 @@ class Agent:
         Position: Compares estimated hand position to estimated target position.
         """
         # 1. Check position reached
-        position_error = np.linalg.norm(np.array([self.rad_j1, self.rad_j2]) - self.p_target)
+        position_error = np.linalg.norm(self.p_hand - self.p_target)
         position_reached = position_error < self.r_target
             
         # Target is reached if all conditions are met

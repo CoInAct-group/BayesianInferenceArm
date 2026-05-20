@@ -7,6 +7,7 @@ batch_name = "seq_targets_test_1" # Defines folder name
 save_results = True
 param_grid = {
     "task_type": ["seq_targets"],
+    "p_target_list": [((.1, .2), (.2, .2), (.2, .1))],
     "planned_max_time_target" : [1.0],
     "max_time_per_trial" : [1.0],
     "apply_proprioceptive_noise": [False],
@@ -15,12 +16,12 @@ param_grid = {
     "r_target" : [0.025],
     # "self_terminate": [True],
     "n_runs": [1],
-    "n_trials": [2]
+    "n_trials": [3]
 }
 
 # Define visualization functions to run for each batch iteration
 plot_functions = [  
-    vis.plotly_animation, 
+    vis.plotly_animation_kin, 
     # vis.plot_joint_angles,
 ]
 plot_file_type = "pdf" # "pdf" or "png" # TODO: add png

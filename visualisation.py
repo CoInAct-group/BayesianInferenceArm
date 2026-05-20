@@ -949,6 +949,231 @@ def plotly_animation(results, show_fig=False, frame_decimation=4, annimation_spe
     print(
         f'Plotly animated plot created with frame_decimation set to {frame_decimation}\n{len(results)} of {org_len} steps animated\nAnimation saved to: {file_name}')
 
+def plotly_animation_kin(results, show_fig=False, frame_decimation=4, annimation_speedup=1, output_filename=None, extra_text=None, file_type = None):
+    org_len = len(results)
+    if org_len == 0:
+        print("Warning: results DataFrame is empty. Cannot generate plotly_animation_kin.")
+        return
+    substract_len = org_len % frame_decimation
+    results.drop(results.index[(org_len-substract_len):], inplace=True)
+    results = results.iloc[::frame_decimation].copy()
+    if results.empty:
+        print(f"Warning: results DataFrame is empty after decimation with factor {frame_decimation}. Cannot generate plotly_animation_kin.")
+        return
+
+    upper_arm_line_true = {'width': 15, 'color': 'steelblue'}
+    lower_arm_line_true = {'width': 15, 'color': 'steelblue'}
+    upper_arm_marker_true = {'size': 15, 'color': 'steelblue'}
+    lower_arm_marker_true = {'size': 15, 'color': 'steelblue'}
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+        x=[results['true_shoulder_x'].iloc[0]],
+        y=[results['true_shoulder_y'].iloc[0]],
+        mode='markers',
+        marker=upper_arm_marker_true,
+        name='Shoulder',
+        legendgroup='true_arm',
+        showlegend=False
+    ))
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='lines+markers',
+        line=lower_arm_line_true,
+        marker=lower_arm_marker_true,
+        name='Lower arm',
+        legendgroup='true_arm',
+        showlegend=False
+    ))
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='lines+markers',
+        line=upper_arm_line_true,
+        marker=upper_arm_marker_true,
+        name='Upper arm',
+        legendgroup='true_arm',
+        showlegend=False
+    ))
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='markers',
+        marker=dict(size=3, color='dodgerblue', opacity=0.5),
+        name='Hand trajectory',
+        legendgroup='true_trajectory',
+        showlegend=True
+    ))
+    fig.add_trace(go.Scatter(
+        x=[],
+        y=[],
+        mode='lines',
+        line=dict(color='black'),
+        fill='toself',
+        fillcolor='rgba(128, 128, 128, 0.2)',
+        name='Target',
+        legendgroup='target',
+        showlegend=True
+    ))
+
+    frames = []
+    i = -1
+    total_iterations = len(results)
+    runs = results['run'].unique()
+    frame_times = []
+    cumulative_hand_x = []
+    cumulative_hand_y = []
+    with tqdm(total=total_iterations, desc="Animation progress") as pbar:
+        for run in runs:
+            trials = results[results['run'] == run]['trial'].unique()
+
+            for trial in trials:
+                n_steps_this_trial = len(
+                    results[(results['trial'] == trial) & (results['run'] == run)])
+                results_trial = results[(results['trial'] == trial) & (
+                    results['run'] == run)]
+
+                for trial_step in range(n_steps_this_trial):
+                    time = results_trial['time_run'].iloc[trial_step] if c.task_type == 'bouncing' else results_trial['time'].iloc[trial_step]
+                    label = f"Trial {trial} time {time:.3f}"
+                    frame_times.append(label)
+                    i += 1
+                    circle_x1, circle_y1 = create_circle(
+                        results_trial['target_x'].iloc[trial_step],
+                        results_trial['target_y'].iloc[trial_step],
+                        results_trial['r_target'].iloc[trial_step])
+
+                    frames.append(go.Frame(
+                        data=[
+                            go.Scatter(
+                                x=[results['true_shoulder_x'].iloc[0]],
+                                y=[results['true_shoulder_y'].iloc[0]],
+                            ),
+                            go.Scatter(
+                                x=[results_trial['true_elbow_x'].iloc[trial_step],
+                                   results_trial['true_hand_x'].iloc[trial_step]],
+                                y=[results_trial['true_elbow_y'].iloc[trial_step],
+                                   results_trial['true_hand_y'].iloc[trial_step]],
+                            ),
+                            go.Scatter(
+                                x=[results_trial['true_shoulder_x'].iloc[trial_step],
+                                   results_trial['true_elbow_x'].iloc[trial_step]],
+                                y=[results_trial['true_shoulder_y'].iloc[trial_step],
+                                   results_trial['true_elbow_y'].iloc[trial_step]],
+                            ),
+                            go.Scatter(
+                                x=list(cumulative_hand_x),
+                                y=list(cumulative_hand_y),
+                            ),
+                            go.Scatter(
+                                x=circle_x1,
+                                y=circle_y1,
+                            ),
+                        ],
+                        name=str(i)
+                    ))
+                    cumulative_hand_x.append(results_trial['true_hand_x'].iloc[trial_step])
+                    cumulative_hand_y.append(results_trial['true_hand_y'].iloc[trial_step])
+                    pbar.update(1)
+
+    fig.frames = frames
+
+    print(f"Total frames: {len(frames)}")
+
+    slider_steps = []
+    for i in range(len(frames)):
+        slider_step = dict(
+            method='animate',
+            label=frame_times[i],
+            args=[
+                [str(i)],
+                dict(
+                    mode='immediate',
+                    frame=dict(duration=0, redraw=False),
+                    transition=dict(duration=0)
+                )
+            ],
+        )
+        slider_steps.append(slider_step)
+
+    sliders = [dict(
+        active=0,
+        currentvalue={'prefix': 'Time: '},
+        pad={'t': 50},
+        steps=slider_steps
+    )]
+
+    x_min = -.5
+    x_max = .5
+    y_min = -.3
+    y_max = .7
+
+    fig.update_xaxes(
+        range=[x_min, x_max],
+        title_text='X Position',
+        scaleanchor='y',
+        scaleratio=1,
+        constrain='domain',
+    )
+    fig.update_yaxes(
+        range=[y_min, y_max],
+        title_text='Y Position',
+        constrain='domain',
+    )
+
+    fig.update_layout(
+        title='True hand movement',
+        width=600,
+        height=600,
+        autosize=False,
+        updatemenus=[
+            {
+                'type': 'buttons',
+                'buttons': [
+                    {
+                        'label': 'Play',
+                        'method': 'animate',
+                        'args': [None, {
+                            'frame': {'duration': ((1000*c.dt)*frame_decimation)/annimation_speedup, 'redraw': False},
+                            'transition': {'duration': ((1000*c.dt)*frame_decimation)/annimation_speedup, 'easing': 'linear'},
+                            'fromcurrent': True,
+                        }]
+                    },
+                    {
+                        'label': 'Pause',
+                        'method': 'animate',
+                        'args': [[None], {
+                            'frame': {'duration': 0, 'redraw': False},
+                            'mode': 'immediate',
+                            'transition': {'duration': 0}
+                        }]
+                    }
+                ],
+                'showactive': False,
+                'y': -0.1,
+                'x': -0.01
+            }
+        ],
+        sliders=sliders,
+        showlegend=True,
+    )
+
+    if show_fig:
+        fig.show(config={'responsive': False})
+
+    file_name = 'outputs/plotly_animation_kin.html' if output_filename == None else output_filename + '.html'
+
+    output_dir = os.path.dirname(file_name)
+    if output_dir and not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+        print(f"Created output directory: {output_dir}")
+
+    fig.write_html(file_name)
+    print(
+        f'Plotly kinematic animation created with frame_decimation set to {frame_decimation}\n{len(results)} of {org_len} steps animated\nAnimation saved to: {file_name}')
+
 def plotly_animation2(results, show_fig=False, frame_decimation=1, annimation_speedup=.5, output_filename=None, extra_text=None, file_type = None):
     org_len = len(results)
     if org_len == 0:

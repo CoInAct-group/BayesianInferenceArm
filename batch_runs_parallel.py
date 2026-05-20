@@ -25,7 +25,7 @@ def run_single_config(combo_info_tuple):
     """Process a single configuration combination"""
     # Unpack combo, base_config, repetition number (1-indexed), and unique seed
     combo, base_config, rep_num, run_seed = combo_info_tuple
-    
+
     # Create run name
     # Filter combo items to include only those that vary across runs (more than one value in param_grid)
     filtered_combo_items = {
@@ -107,6 +107,8 @@ def run_single_config(combo_info_tuple):
     for key, value in combo.items():
         if key in results.columns:
             continue
+        if key == "p_target_list":
+            continue  # nested sequence; cannot broadcast to per-step rows
         if isinstance(value, np.ndarray):
             results[key] = str(value.tolist())
         else:
@@ -127,9 +129,12 @@ def run_single_config(combo_info_tuple):
 
     # Add the varying parameters to the list of columns to save, ensuring no duplicates
     if hasattr(b, 'save_all_cols') and b.save_all_cols:
-        save_results_cols = list(results.columns)
+        save_results_cols = [col for col in results.columns if col != "p_target_list"]
     else:
-        save_results_cols = list(dict.fromkeys(b.save_cols + varying_param_keys))
+        save_results_cols = [
+            col for col in dict.fromkeys(b.save_cols + varying_param_keys)
+            if col != "p_target_list"
+        ]
     # print(varying_param_keys)
     results_filename = f"{results_dir}/results_batchrun_{run_name}.tsv"
     if b.save_results:
