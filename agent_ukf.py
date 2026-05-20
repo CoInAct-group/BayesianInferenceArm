@@ -3,7 +3,6 @@ import numpy as np
 import config_ukf as c
 import time
 import os
-from scipy.linalg import cholesky
 from scipy.linalg import solve_discrete_are
 
 class Agent:
@@ -84,6 +83,13 @@ class Agent:
         self.torque_j1 = 0.0
         self.torque_j2 = 0.0
         self.torque_j3 = 0.0
+
+        # Joint torque limits
+        self.torque_j1_max = c.torque_j1_max
+        self.torque_j2_max = c.torque_j2_max
+        self.rfd_j1_max = self.torque_j1_max * (self.dt/c.time_to_max_force)
+        self.rfd_j2_max = self.torque_j2_max * (self.dt/c.time_to_max_force)
+        self.limit_rfd = c.limit_rfd
 
         self.damping_factor_j1 = c.damping_factor_j1
         self.damping_factor_j2 = c.damping_factor_j2
@@ -269,16 +275,6 @@ class Agent:
         if self.time > 2.8 and self.time < 3.1:
             print(f"time: {self.time}, vis_feedback: {self.visual_feedback}")
             
-
-    def time_to_index(self, time):
-        """
-        Converts a time in seconds to an index in the step array.
-        """
-        index = int(time / self.dt)
-        if index >= self.n_steps_max:
-            index = self.n_steps_max - 1
-        return index
-    
     def setup_seq_targets(self):
         """
         Set a sequence of target locations, given a list. Once within a trigger dist of each target, shift to next target in sequence. 
@@ -622,197 +618,22 @@ class Agent:
         else:
             raise ValueError("Non-receeding horizon not yet implemented in calc_torques")
 
-    def calculate_torques(self):
-        """
-        Dispatches to the appropriate torque calculation method based on the configuration.
-        """
-        if self.movement_target:
-            return self._calculate_torques_oct()
-        else:
-            self.torque_j1_ff = 0.0
-            self.torque_j2_ff = 0.0
-            self.torque_j1_sigma_scaled = self.torque_j1_sigma_const
-            self.torque_j2_sigma_scaled = self.torque_j2_sigma_const
-            return self.torque_j1_ff, self.torque_j2_ff
-
-
-    def _calculate_torques_oct(self):
-        """
-        Calculates torques using a Feedforward + Feedback control scheme.
-
-        The feedforward component is the optimal torque pre-computed by the LQR planner.
-
-        This method relies on `get_trajectory_targets_oct_receeding_horizon` having been called first to
-        populate `self.torque_ff_planned`, `self.p_ref_planned`, and `self.v_ref_planned`.
-        """
-        if self.use_receeding_horizon:
-            self.get_trajectory_targets_oct_receeding_horizon()
-        else:
-            self.get_trajectory_targets_oct_open_loop()
-        # Store the planned state and torques for the this time step (from previous planning step)
-        self.rad_j1_target_intermediate_this_step = self.rad_j1_target_intermediate 
-        self.rad_j2_target_intermediate_this_step = self.rad_j2_target_intermediate
-        self.omega_j1_target_intermediate_this_step = self.omega_j1_target_intermediate
-        self.omega_j2_target_intermediate_this_step = self.omega_j2_target_intermediate
-
-        # 2. Get Reference State (planned position and velocity) from the planner's output
-        (self.rad_j1_target_intermediate, self.rad_j2_target_intermediate, 
-             self.omega_j1_target_intermediate, self.omega_j2_target_intermediate) = self.planned_state
-
-        # Eq. \ref{eq:comp}: compensate feedforward by estimated disturbance torque
-        if self.est_tau_ext:
-            self.torque_j1_ff -= self.x_est_ukf[4]
-            self.torque_j2_ff -= self.x_est_ukf[5]
-
-        torque_j1_efferent = self.torque_j1_ff
-        torque_j2_efferent = self.torque_j2_ff
-
-        # Update motor noise parameters
-        if not self.passive_movement:
-            self.torque_j1_sigma_scaled = self.torque_j1_sigma_const + abs(self.torque_j1_sigma_prop * torque_j1_efferent)
-            self.torque_j2_sigma_scaled = self.torque_j2_sigma_const + abs(self.torque_j2_sigma_prop * torque_j2_efferent)
-        else:
-            self.torque_j1_sigma_scaled = self.torque_j1_sigma_const
-            self.torque_j2_sigma_scaled = self.torque_j2_sigma_const
-
-        if self.j1_locked:
-            torque_j1_efferent = 0.0
-            self.torque_j1_sigma_scaled = 0.0
-
-        # Check if movement should be initiated
-        time_check = self.time_run if self.task_type == 'tapping' else self.time
-        if time_check < self.min_time_before_movement:
-            self.j1_integral = 0.0
-            self.j2_integral = 0.0
-            self.torque_j1_sigma_scaled = self.torque_j1_sigma_const
-            self.torque_j2_sigma_scaled = self.torque_j2_sigma_const
-            return 0.0, 0.0
-        else:
-            return torque_j1_efferent, torque_j2_efferent
-
     def check_target_reached(self): 
         """
         NOTE Currently uses true target values, skips any target state estimation.
         Checks if the target has been reached in terms of position and velocity.
         Position: Compares estimated hand position to estimated target position.
         """
-        if not self.movement_target:
-            return
-        if self.j1_locked:
-            rad_j2_mu_posterior = self.x_est_ukf[1]
-            move_dist = np.abs(self.rad_j2_hand_init - rad_j2_mu_posterior)
-            position_reached = (move_dist > np.abs(self.rad_j2_target_init_rel) - self.rad_j2_target_radius)
-            time_reached = self.time >= self.planned_max_time_target
-
-            self.target_reached = position_reached and time_reached # Complete the intended move, and be within the targetradius
-
-        else: 
-            p_hand_mu_posterior = self.x_est_cartesian_ukf[0:2]
+        # 1. Check position reached
+        position_error = np.linalg.norm(np.array([self.rad_j1, self.rad_j2]) - self.p_target)
+        position_reached = position_error < self.r_target
             
-            # Target position and velocity (using true target values as per your previous change)
-            p_target_to_check = self.p_target 
-
-            # 1. Check position reached
-            position_error = np.linalg.norm(p_hand_mu_posterior - p_target_to_check)
-            position_reached = position_error < self.r_target
-                
-            # Target is reached if all conditions are met
-            self.target_reached = position_reached
+        # Target is reached if all conditions are met
+        self.target_reached = position_reached
 
         # if (self.target_reached and self.self_terminate) or (self.time >= self.max_time_per_trial) or ((self.time >= self.planned_max_time_target + self.min_time_before_movement+0.1) and self.self_terminate):
         if (self.target_reached and self.self_terminate) or (self.time >= self.max_time_per_trial):
             self.trial_ended_by_agent = True
-
-    def calculate_acceleration_due_to_torque(self, torque_mu, inertia_mu, torque_sigma=0.0, inertia_sigma=0.0):
-        """Calculates mean and sigma of angular acceleration due to a torque, considering uncertainty in both.
-
-        Args:
-            torque_mu (float): The mean of the applied torque.
-            inertia_mu (float): The mean of the moment of inertia.
-            torque_sigma (float, optional): The standard deviation of the torque. Defaults to 0.0.
-            inertia_sigma (float, optional): The standard deviation of the inertia. Defaults to 0.0.
-
-        Returns:
-            tuple[float, float]: (mean_acceleration, sigma_acceleration).
-                                 Returns (np.nan, np.nan) if inputs are invalid (NaN or zero/small inertia_mu).
-        """
-        # Handle NaN inputs or zero/small inertia_mu for mean calculation
-        if np.isnan(torque_mu) or np.isnan(inertia_mu) or inertia_mu <= 1e-9: # Check for zero or very small inertia
-            return np.nan, np.nan
-        
-        accel_mu = torque_mu / inertia_mu
-
-        # Ensure sigmas are non-negative and not NaN for variance calculation
-        current_torque_sigma = 0.0 if (np.isnan(torque_sigma) or torque_sigma < 0) else torque_sigma
-        current_inertia_sigma = 0.0 if (np.isnan(inertia_sigma) or inertia_sigma < 0) else inertia_sigma
-
-        # Calculate variance components if inertia_mu is not zero
-        # Var(alpha) = (1/I_mu^2) * Var(torque) + (torque_mu^2 / I_mu^4) * Var(I)
-        var_from_torque = (1 / (inertia_mu**2)) * (current_torque_sigma**2)
-        var_from_inertia = ((torque_mu**2) / (inertia_mu**4)) * (current_inertia_sigma**2)
-        
-        total_variance = var_from_torque + var_from_inertia
-        
-        if total_variance >= 0: # Ensure variance is non-negative before sqrt
-            accel_sigma = np.sqrt(total_variance)
-        else:
-            accel_sigma = np.nan # Should not happen if sigmas are handled correctly
-            
-        return accel_mu, accel_sigma
-
-    def calculate_torque_due_to_damping(self, omega_mu, damping_factor, omega_sigma=0.0):
-        """Calculates mean and sigma of torque due to damping.
-        
-        Args:
-            omega_mu (float): The mean of the angular velocity.
-            damping_factor (float): The damping coefficient (assumed certain).
-            omega_sigma (float, optional): The standard deviation of the angular velocity. Defaults to 0.0.
-
-        Returns:
-            tuple[float, float]: (mean_damping_torque, sigma_damping_torque).
-                                 Returns (np.nan, np.nan) if inputs are invalid.
-        """
-        if np.isnan(omega_mu) or np.isnan(damping_factor):
-            return np.nan, np.nan
-            
-        torque_mu = -omega_mu * damping_factor
-
-        # Ensure sigmas are non-negative and not NaN for variance calculation
-        current_omega_sigma = 0.0 if (np.isnan(omega_sigma) or omega_sigma < 0) else omega_sigma
-
-        # Variance of torque = (-damping_factor)^2 * Var(omega)
-        var_from_omega = (damping_factor**2) * (current_omega_sigma**2)
-        
-        if var_from_omega >= 0:
-            torque_sigma = np.sqrt(var_from_omega)
-        else:
-            torque_sigma = np.nan # Should not happen
-
-        return torque_mu, torque_sigma
-
-    def calculate_cartesian_space_inertia(self, rad_j1, rad_j2, omega_j1=0.0, omega_j2=0.0, true_physics=False):
-        """Compute the operational-space inertia matrix Lambda(q) = (J M^{-1} J^T)^{-1}.
-
-        Args:
-            rad_j1 (float): Joint 1 angle (rad).
-            rad_j2 (float): Joint 2 angle (rad).
-            omega_j1 (float, optional): Joint 1 angular velocity (unused, for future). Defaults to 0.0.
-            omega_j2 (float, optional): Joint 2 angular velocity (unused, for future). Defaults to 0.0.
-
-        Returns:
-            np.ndarray: 2x2 operational-space inertia matrix.
-        """
-        M = self._calculate_mass_matrix(rad_j2, true_physics=true_physics)
-        J = self.calculate_jacobian(rad_j1, rad_j2, true_physics=true_physics)
-        Minv = np.linalg.inv(M)
-        Lambda_inv = J @ Minv @ J.T
-        try:
-            Lambda = np.linalg.inv(Lambda_inv)
-        except np.linalg.LinAlgError:
-            # Fallback: regularize slightly to avoid singularity
-            eps = 1e-8
-            Lambda = np.linalg.inv(Lambda_inv + eps * np.eye(2))
-        return Lambda
 
     def calculate_torque_due_to_gravity(self, joint_index, current_rad_j1, current_rad_j2, true_physics=False):
         """Calculates torque due to gravity for a specific joint.
@@ -1566,16 +1387,10 @@ class Agent:
         # 2. Calculate applied and external torques
         motor_torques = np.array([torque_j1_efferent, torque_j2_efferent])
         
-        if true_physics:
-            damping_torques = np.array([
-                -self.damping_factor_j1 * q_dot[0],
-                -self.damping_factor_j2 * q_dot[1]
-            ])
-        else:
-            damping_torques = np.array([
-                -(self.damping_factor_believed_offset_j1+self.damping_factor_j1) * q_dot[0],
-                -(self.damping_factor_believed_offset_j2+self.damping_factor_j2) * q_dot[1]
-            ])
+        damping_torques = np.array([
+            -self.damping_factor_j1 * q_dot[0],
+            -self.damping_factor_j2 * q_dot[1]
+        ])
 
 
         # 3. Solve for angular acceleration (q_ddot)
@@ -1662,11 +1477,6 @@ class Agent:
             torques = J.T @ force
             return torques
 
-    @staticmethod
-    def _wrap_angle(angle):
-        """Wraps angle to the range [-pi, pi]."""
-        return (angle + np.pi) % (2 * np.pi) - np.pi
-
     def calculate_jacobian(self, rad_j1, rad_j2, true_physics=False):
         """Calculates the Jacobian matrix for the forward kinematics.
 
@@ -1750,53 +1560,6 @@ class Agent:
         if np.isnan(J_num).any():
             raise ValueError(f"Numerical Jacobian for elbow_down resulted in NaNs for state ({rad_j1},{rad_j2}). J_num: {J_num}")
         return J_num
-
-    def calculate_jacobian_dot(self, rad_j1, rad_j2, omega_j1, omega_j2, true_physics=False):
-        """Computes the time derivative of the Jacobian, J_dot, at the given state.
-
-        For elbow_out configuration, uses closed-form expressions for a 2-link planar arm.
-        For elbow_down configuration, uses numerical differentiation of J with respect
-        to q and multiplies by q_dot: J_dot ≈ (∂J/∂q1) * q̇1 + (∂J/∂q2) * q̇2.
-        """
-        if np.isnan(rad_j1) or np.isnan(rad_j2) or np.isnan(omega_j1) or np.isnan(omega_j2):
-            return np.zeros((2, 2))
-
-        if self.elbow_down:
-            # Numerical partials of J w.r.t q1, q2
-            h = 1e-7
-            J = self.calculate_jacobian(rad_j1, rad_j2, true_physics=true_physics)
-            J_q1_plus = self.calculate_jacobian(rad_j1 + h, rad_j2, true_physics=true_physics)
-            J_q1_minus = self.calculate_jacobian(rad_j1 - h, rad_j2, true_physics=true_physics)
-            dJ_dq1 = (J_q1_plus - J_q1_minus) / (2 * h)
-
-            J_q2_plus = self.calculate_jacobian(rad_j1, rad_j2 + h, true_physics=true_physics)
-            J_q2_minus = self.calculate_jacobian(rad_j1, rad_j2 - h, true_physics=true_physics)
-            dJ_dq2 = (J_q2_plus - J_q2_minus) / (2 * h)
-
-            return dJ_dq1 * omega_j1 + dJ_dq2 * omega_j2
-
-        # Elbow_out closed-form
-        L1 = self.true_len_upper_arm
-        L2 = self.true_len_lower_arm
-
-        s1 = np.sin(rad_j1)
-        c1 = np.cos(rad_j1)
-        s12 = np.sin(rad_j1 + rad_j2)
-        c12 = np.cos(rad_j1 + rad_j2)
-        w1 = omega_j1
-        w2 = omega_j2
-        w12 = w1 + w2
-
-        J_dot = np.zeros((2, 2))
-        # d/dt[-L1 s1 - L2 s12] = -L1 c1*w1 - L2 c12*(w1+w2)
-        J_dot[0, 0] = -L1 * c1 * w1 - L2 * c12 * w12
-        # d/dt[-L2 s12] = -L2 c12*(w1+w2)
-        J_dot[0, 1] = -L2 * c12 * w12
-        # d/dt[L1 c1 + L2 c12] = -L1 s1*w1 - L2 s12*(w1+w2)
-        J_dot[1, 0] = -L1 * s1 * w1 - L2 * s12 * w12
-        # d/dt[L2 c12] = -L2 s12*(w1+w2)
-        J_dot[1, 1] = -L2 * s12 * w12
-        return J_dot
 
 
     def get_trajectory_targets_oct_receeding_horizon(self, current_state):
@@ -1911,48 +1674,11 @@ class Agent:
             self.p_planned_trajectory = np.array([np.nan, np.nan])
             self.v_planned_trajectory = np.array([np.nan, np.nan])
 
-    def _dynamics_simplified(self, state, u):
-        rad_j1_k, rad_j2_k, omega_j1_k, omega_j2_k = state[:4]
-        torque_j1, torque_j2 = u
-        # Only return position and vel, not torque
-        return self._update_joint_kinematics_simplified(rad_j1_k, rad_j2_k, omega_j1_k, omega_j2_k, torque_j1, torque_j2)[:4]
-
     def _dynamics_full(self, state, u):
         rad_j1_k, rad_j2_k, omega_j1_k, omega_j2_k = state[:4]
         torque_j1, torque_j2 = u
         # Only return position and vel, not torque
         return self._update_joint_kinematics_full(rad_j1_k, rad_j2_k, omega_j1_k, omega_j2_k, torque_j1, torque_j2)[:4]
-
-    def _linearize_dynamics(self, dynamics_func, x, u):
-        """
-        Linearizes the dynamics function f(x, u) around the point (x, u)
-        using numerical differentiation (finite differences).
-        Returns the Jacobian matrices A and B.
-        """
-        n = len(x)  # State dimensions
-        m = len(u)  # Control dimensions
-        epsilon = 1e-6
-
-        # Pre-calculate nominal next state
-        x_next_nominal = dynamics_func(x, u)
-
-        # Calculate A = df/dx
-        A = np.zeros((n, n))
-        for i in range(n):
-            x_perturbed = np.copy(x)
-            x_perturbed[i] += epsilon
-            x_next_perturbed = dynamics_func(x_perturbed, u)
-            A[:, i] = (x_next_perturbed - x_next_nominal) / epsilon
-
-        # Calculate B = df/du
-        B = np.zeros((n, m))
-        for i in range(m):
-            u_perturbed = np.copy(u)
-            u_perturbed[i] += epsilon
-            x_next_perturbed = dynamics_func(x, u_perturbed)
-            B[:, i] = (x_next_perturbed - x_next_nominal) / epsilon
-            
-        return A, B
 
     def _linearize_dynamics_analytic(self, x, u, dt=None, cancel_nonlinearity=True):
         """
@@ -2067,65 +1793,6 @@ class Agent:
         self.K_reg = np.linalg.solve(self.R_lqr + B_d.T @ P @ B_d, B_d.T @ P @ A_d)
         self._reg_target_state = x_star
         self._reg_last_u = np.array([0.0, 0.0], dtype=float)  # for optional RFD limiting
-
-    # Drop-in replacement: regulator-based “planner” (no fixed arrival time required)
-    def _plan_optimal_trajectory_regulator(self, initial_state, final_state, duration, dt, return_all_steps=True, forward_steps=1):
-        """
-        Time-invariant LQR around final_state with computed-torque cancellation.
-        Returns (x_traj, u_traj) similar to other planners. Horizon length:
-        - if return_all_steps: N = max(1, int(duration/dt))  [just for rollout length]
-        - else: N = max(1, forward_steps)
-        Arrival time is not enforced; it emerges from Q/R and dynamics.
-        """
-        self._ensure_lqr_regulator(final_state)
-        K = self.K_reg
-        x_star = self._reg_target_state
-
-        # Choose rollout length (does not enforce arrival time)
-        N = max(1, int(duration / dt)) if return_all_steps else max(1, int(forward_steps))
-
-        # Select dynamics function
-        dynamics_func = self._dynamics_simplified if self.use_simplified_model else self._dynamics_full
-
-        def cancellation_tau(x):
-            q1, q2, w1, w2 = x[:4]
-
-            # Coriolis/centrifugal
-            m2 = self.true_m_lower_arm; L1 = self.true_len_upper_arm; lc2 = self.true_len_lower_arm / 2.0
-            H = -m2 * L1 * lc2 * np.sin(q2)
-            h = np.array([H * (2.0 * w1 * w2 + w2**2), H * (-w1**2)])
-            # Viscous damping
-            D = np.diag([self.damping_factor_j1, self.damping_factor_j2])
-            return h + D @ np.array([w1, w2])
-
-        x_traj = [np.array(initial_state, dtype=float)]
-        u_traj = []
-        u_prev = getattr(self, '_reg_last_u', np.array([0.0, 0.0], dtype=float))
-
-        for k in range(N):
-            xk = x_traj[-1]
-            e = xk - x_star
-            tau_ff = cancellation_tau(xk)
-            u = tau_ff - K @ e
-
-            # Optional rate/torque limits
-            if self.limit_rfd:
-                du = u - u_prev
-                du[0] = np.clip(du[0], -self.rfd_j1_max, self.rfd_j1_max)
-                du[1] = np.clip(du[1], -self.rfd_j2_max, self.rfd_j2_max)
-                u = u_prev + du
-
-            u[0] = np.clip(u[0], -self.torque_j1_max, self.torque_j1_max)
-            u[1] = np.clip(u[1], -self.torque_j2_max, self.torque_j2_max)
-
-            # Roll dynamics one step
-            x_next = dynamics_func(xk, u)
-            x_traj.append(x_next)
-            u_traj.append(u.copy())
-            u_prev = u
-
-        self._reg_last_u = u_prev  # keep for next call
-        return np.array(x_traj), np.array(u_traj)
 
     def _lqr_classic_control(self, current_state, final_state):
         """
@@ -2263,13 +1930,6 @@ class Agent:
         x_traj = [z[:n] for z in z_traj]
         return np.array(x_traj), np.array(u_traj)
 
-    @staticmethod
-    def _weighted_circular_mean(angles, weights):
-        """Calculates the weighted circular mean of a set of angles."""
-        s_sum = np.sum(weights * np.sin(angles))
-        c_sum = np.sum(weights * np.cos(angles))
-        return np.arctan2(s_sum, c_sum)
-
     def unpack_ukf_results_vectorized(self, results_df):
         """
         Unpacks various state vectors from the UKF results DataFrame into individual columns
@@ -2284,22 +1944,18 @@ class Agent:
         # Initialize a dictionary to hold all new columns
         data_for_df = {}
         # Time and step (direct assignment)
-        cols_to_extract = ['seed', 'time', 'time_run', 'dt','step', 'trial', 'run', 'visual_feedback', 'proprioceptive_feedback_rad', 'proprioceptive_feedback_omega',
+        cols_to_extract = ['seed', 'time', 'time_run', 'dt', 'step', 'trial', 'run', 'visual_feedback', 'proprioceptive_feedback_rad', 'proprioceptive_feedback_omega',
                            'visual_feedback_rotation', 'proprioceptive_offset_rad_j1', 'proprioceptive_offset_omega_j1',
                            'proprioceptive_offset_rad_j2', 'proprioceptive_offset_omega_j2',
-                           'r_target', 'lim_j1_min', 'lim_j1_max', 'lim_j2_min', 'lim_j2_max',
-                           'torque_j1_max', 'torque_j2_max', 'torque_j1_sigma_const', 'torque_j2_sigma_const',
-                           'torque_j1_sigma_prop', 'torque_j2_sigma_prop', 'damping_factor_j1', 'damping_factor_j2',
-                           'dampen_torque', 'rfd_j1_max', 'rfd_j2_max', 'limit_rfd', 'torque_j1', 'torque_j2', 'torque_j3',
-                           'torque_j1_sigma_scaled', 'torque_j2_sigma_scaled', 'P_est_cartesian_ukf',
+                           'r_target', 'torque_j2_sigma_const', 'torque_j2_sigma_prop',
+                           'damping_factor_j1', 'damping_factor_j2',
+                           'torque_j1', 'torque_j2', 'torque_j1_sigma_scaled', 'torque_j2_sigma_scaled', 'P_est_cartesian_ukf',
                            'planned_max_time_target',
-                           'rad_j1_target', 'rad_j2_target', 'omega_j1_target', 'omega_j2_target',
-                           'rad_j1_target_intermediate', 'rad_j2_target_intermediate',
-                           'omega_j1_target_intermediate', 'omega_j2_target_intermediate',
+                           'rad_j1_target', 'rad_j2_target',
                            'rad_j1_target_intermediate_this_step', 'rad_j2_target_intermediate_this_step',
                            'omega_j1_target_intermediate_this_step', 'omega_j2_target_intermediate_this_step',
-                           'torque_j1_efferent', 'torque_j2_efferent', 'r_target_out', 'r_target_home', 'rad_j1_target_radius', 'rad_j2_target_radius', 
-                           'torque_j1_ff', 'torque_j2_ff', 'alpha_j1', 'alpha_j2', 'proprioceptive_intervention_on_angle', 'proprioceptive_intervention_on_angle_rad',
+                           'torque_j1_efferent', 'torque_j2_efferent', 'r_target_out', 'r_target_home', 'rad_j1_target_radius', 'rad_j2_target_radius',
+                           'torque_j1_ff', 'torque_j2_ff', 'proprioceptive_intervention_on_angle',
                            'vis_hand_j1', 'vis_hand_j2'
                            ]
         for col in cols_to_extract:
@@ -2368,32 +2024,11 @@ class Agent:
                 data_for_df[f'true_{col_name}'] = results_df[col_name]
 
         # UKF Joint Space States
-        if 'x_ukf' in results_df.columns: # True state array used by UKF
-            data_for_df['x_ukf_true_rad_j1'] = extract_vector_column(results_df['x_ukf'], 0, self.L_ukf)
-            data_for_df['x_ukf_true_rad_j2'] = extract_vector_column(results_df['x_ukf'], 1, self.L_ukf)
-            data_for_df['x_ukf_true_omega_j1'] = extract_vector_column(results_df['x_ukf'], 2, self.L_ukf)
-            data_for_df['x_ukf_true_omega_j2'] = extract_vector_column(results_df['x_ukf'], 3, self.L_ukf)
-            if self.est_tau_ext:
-                data_for_df['x_ukf_true_tau_ext_j1'] = extract_vector_column(results_df['x_ukf'], 4, self.L_ukf)
-                data_for_df['x_ukf_true_tau_ext_j2'] = extract_vector_column(results_df['x_ukf'], 5, self.L_ukf)
-
-        if 'x_pred_ukf' in results_df.columns: # Prior joint state
-            data_for_df['prior_rad_j1'] = extract_vector_column(results_df['x_pred_ukf'], 0, self.L_ukf)
-            data_for_df['prior_rad_j2'] = extract_vector_column(results_df['x_pred_ukf'], 1, self.L_ukf)
-            data_for_df['prior_omega_j1'] = extract_vector_column(results_df['x_pred_ukf'], 2, self.L_ukf)
-            data_for_df['prior_omega_j2'] = extract_vector_column(results_df['x_pred_ukf'], 3, self.L_ukf)
-            if self.est_tau_ext:
-                data_for_df['prior_tau_ext_j1'] = extract_vector_column(results_df['x_pred_ukf'], 4, self.L_ukf)
-                data_for_df['prior_tau_ext_j2'] = extract_vector_column(results_df['x_pred_ukf'], 5, self.L_ukf)
-
         if 'P_pred_ukf' in results_df.columns: # Prior joint covariance (standard deviations)
             data_for_df['prior_sigma_rad_j1'] = np.sqrt(extract_matrix_diag_column(results_df['P_pred_ukf'], 0, (self.L_ukf, self.L_ukf)))
             data_for_df['prior_sigma_rad_j2'] = np.sqrt(extract_matrix_diag_column(results_df['P_pred_ukf'], 1, (self.L_ukf, self.L_ukf)))
             data_for_df['prior_sigma_omega_j1'] = np.sqrt(extract_matrix_diag_column(results_df['P_pred_ukf'], 2, (self.L_ukf, self.L_ukf)))
             data_for_df['prior_sigma_omega_j2'] = np.sqrt(extract_matrix_diag_column(results_df['P_pred_ukf'], 3, (self.L_ukf, self.L_ukf)))
-            if self.est_tau_ext:
-                data_for_df['prior_sigma_tau_ext_j1'] = np.sqrt(extract_matrix_diag_column(results_df['P_pred_ukf'], 4, (self.L_ukf, self.L_ukf)))
-                data_for_df['prior_sigma_tau_ext_j2'] = np.sqrt(extract_matrix_diag_column(results_df['P_pred_ukf'], 5, (self.L_ukf, self.L_ukf)))
 
         if 'x_est_ukf' in results_df.columns: # Posterior joint state
             data_for_df['posterior_rad_j1'] = extract_vector_column(results_df['x_est_ukf'], 0, self.L_ukf)
@@ -2414,29 +2049,11 @@ class Agent:
                 data_for_df['posterior_sigma_tau_ext_j2'] = np.sqrt(extract_matrix_diag_column(results_df['P_ukf'], 5, (self.L_ukf, self.L_ukf)))
 
         # UKF Cartesian Space States
-        if 'z_pred_visual_ukf' in results_df.columns: # Prior hand Cartesian position
-            data_for_df['prior_hand_x'] = extract_vector_column(results_df['z_pred_visual_ukf'], 0, 2)
-            data_for_df['prior_hand_y'] = extract_vector_column(results_df['z_pred_visual_ukf'], 1, 2)
-            data_for_df['prior_hand_vx'] = np.nan
-            data_for_df['prior_hand_vy'] = np.nan
-            data_for_df['prior_elbow_x'] = np.nan
-            data_for_df['prior_elbow_y'] = np.nan
-        
         if 'x_est_cartesian_ukf' in results_df.columns: # Posterior Cartesian state
             data_for_df['posterior_hand_x'] = extract_vector_column(results_df['x_est_cartesian_ukf'], 0, 6)
             data_for_df['posterior_hand_y'] = extract_vector_column(results_df['x_est_cartesian_ukf'], 1, 6)
-            data_for_df['posterior_hand_vx'] = extract_vector_column(results_df['x_est_cartesian_ukf'], 2, 6)
-            data_for_df['posterior_hand_vy'] = extract_vector_column(results_df['x_est_cartesian_ukf'], 3, 6)
             data_for_df['posterior_elbow_x'] = extract_vector_column(results_df['x_est_cartesian_ukf'], 4, 6)
             data_for_df['posterior_elbow_y'] = extract_vector_column(results_df['x_est_cartesian_ukf'], 5, 6)
-
-        if 'P_est_cartesian_ukf' in results_df.columns: # Posterior Cartesian covariance (variances)
-            data_for_df['posterior_hand_var_x'] = extract_matrix_diag_column(results_df['P_est_cartesian_ukf'], 0, (6,6))
-            data_for_df['posterior_hand_var_y'] = extract_matrix_diag_column(results_df['P_est_cartesian_ukf'], 1, (6,6))
-            data_for_df['posterior_hand_var_vx'] = extract_matrix_diag_column(results_df['P_est_cartesian_ukf'], 2, (6,6))
-            data_for_df['posterior_hand_var_vy'] = extract_matrix_diag_column(results_df['P_est_cartesian_ukf'], 3, (6,6))
-            data_for_df['posterior_elbow_var_x'] = extract_matrix_diag_column(results_df['P_est_cartesian_ukf'], 4, (6,6))
-            data_for_df['posterior_elbow_var_y'] = extract_matrix_diag_column(results_df['P_est_cartesian_ukf'], 5, (6,6))
 
         if 'sigmas_cartesian_transformed' in results_df.columns and c.plot_sigma_points:
             series_sigmas_cart = results_df['sigmas_cartesian_transformed']
@@ -2451,25 +2068,6 @@ class Agent:
                 data_for_df[f'sigmas_cartesian_transformed_{i}_y'] = extract_vector_column(series_sp_vectors, 1, vector_len_cart_state)
 
 
-        # Measurements (z_ukf or z_measurement)
-        meas_col_name = 'z_ukf'
-        if meas_col_name in results_df.columns:
-            data_for_df['meas_vis_x'] = extract_vector_column(results_df[meas_col_name], 0, 6)
-            data_for_df['meas_vis_y'] = extract_vector_column(results_df[meas_col_name], 1, 6)
-            data_for_df['meas_prop_rad_j1'] = extract_vector_column(results_df[meas_col_name], 2, 6)
-            data_for_df['meas_prop_rad_j2'] = extract_vector_column(results_df[meas_col_name], 3, 6)
-            data_for_df['meas_prop_omega_j1'] = extract_vector_column(results_df[meas_col_name], 4, 6)
-            data_for_df['meas_prop_omega_j2'] = extract_vector_column(results_df[meas_col_name], 5, 6)
-
-        # Full Innovation Vector (ukf_full_innovation)
-        if 'full_innovation_ukf' in results_df.columns:
-            data_for_df['innov_vis_x'] = extract_vector_column(results_df['full_innovation_ukf'], 0, 6)
-            data_for_df['innov_vis_y'] = extract_vector_column(results_df['full_innovation_ukf'], 1, 6)
-            data_for_df['innov_prop_rad_j1'] = extract_vector_column(results_df['full_innovation_ukf'], 2, 6)
-            data_for_df['innov_prop_rad_j2'] = extract_vector_column(results_df['full_innovation_ukf'], 3, 6)
-            data_for_df['innov_prop_omega_j1'] = extract_vector_column(results_df['full_innovation_ukf'], 4, 6)
-            data_for_df['innov_prop_omega_j2'] = extract_vector_column(results_df['full_innovation_ukf'], 5, 6)
-
         # Component-wise Normalized Innovation (normalized_innovation_ukf)
         if 'normalized_innovation_ukf' in results_df.columns:
             data_for_df['norm_innov_vis_x'] = extract_vector_column(results_df['normalized_innovation_ukf'], 0, 6)
@@ -2479,22 +2077,10 @@ class Agent:
             data_for_df['norm_innov_prop_omega_j1'] = extract_vector_column(results_df['normalized_innovation_ukf'], 4, 6)
             data_for_df['norm_innov_prop_omega_j2'] = extract_vector_column(results_df['normalized_innovation_ukf'], 5, 6)
 
-        # Diagonal of Full Predicted Measurement Covariance (diag_P_z_full_ukf)
-        if 'diag_P_z_full_ukf' in results_df.columns:
-            data_for_df['var_pred_meas_vis_x'] = extract_vector_column(results_df['diag_P_z_full_ukf'], 0, 6)
-            data_for_df['var_pred_meas_vis_y'] = extract_vector_column(results_df['diag_P_z_full_ukf'], 1, 6)
-            data_for_df['var_pred_meas_prop_rad_j1'] = extract_vector_column(results_df['diag_P_z_full_ukf'], 2, 6)
-            data_for_df['var_pred_meas_prop_rad_j2'] = extract_vector_column(results_df['diag_P_z_full_ukf'], 3, 6)
-            data_for_df['var_pred_meas_prop_omega_j1'] = extract_vector_column(results_df['diag_P_z_full_ukf'], 4, 6)
-            data_for_df['var_pred_meas_prop_omega_j2'] = extract_vector_column(results_df['diag_P_z_full_ukf'], 5, 6)
-
         # Target states
         if 'p_target' in results_df.columns:
             data_for_df['target_x'] = extract_vector_column(results_df['p_target'], 0, 2)
             data_for_df['target_y'] = extract_vector_column(results_df['p_target'], 1, 2)
-        if 'vis_p_target_mu' in results_df.columns:
-            data_for_df['vis_target_x'] = extract_vector_column(results_df['vis_p_target_mu'], 0, 2)
-            data_for_df['vis_target_y'] = extract_vector_column(results_df['vis_p_target_mu'], 1, 2)
         if 'p_target_home' in results_df.columns and not None:
             data_for_df['p_target_home_x'] = extract_vector_column(results_df['p_target_home'], 0, 2)
             data_for_df['p_target_home_y'] = extract_vector_column(results_df['p_target_home'], 1, 2)
@@ -2590,21 +2176,10 @@ class Agent:
                 return combined_data.apply(safe_extract, axis=1)
             
             if 'measurement_available_mask' in results_df.columns:
-                # Cross-covariances: Visual X to joint states
-                data_for_df['cross_cov_vis_x_rad_j1'] = extract_cross_cov_vis_to_joint(
-                    results_df['P_xz_available'], 0, 0, results_df['measurement_available_mask'])
-                data_for_df['cross_cov_vis_x_rad_j2'] = extract_cross_cov_vis_to_joint(
-                    results_df['P_xz_available'], 0, 1, results_df['measurement_available_mask'])
                 data_for_df['cross_cov_vis_x_omega_j1'] = extract_cross_cov_vis_to_joint(
                     results_df['P_xz_available'], 0, 2, results_df['measurement_available_mask'])
                 data_for_df['cross_cov_vis_x_omega_j2'] = extract_cross_cov_vis_to_joint(
                     results_df['P_xz_available'], 0, 3, results_df['measurement_available_mask'])
-                
-                # Cross-covariances: Visual Y to joint states
-                data_for_df['cross_cov_vis_y_rad_j1'] = extract_cross_cov_vis_to_joint(
-                    results_df['P_xz_available'], 1, 0, results_df['measurement_available_mask'])
-                data_for_df['cross_cov_vis_y_rad_j2'] = extract_cross_cov_vis_to_joint(
-                    results_df['P_xz_available'], 1, 1, results_df['measurement_available_mask'])
                 data_for_df['cross_cov_vis_y_omega_j1'] = extract_cross_cov_vis_to_joint(
                     results_df['P_xz_available'], 1, 2, results_df['measurement_available_mask'])
                 data_for_df['cross_cov_vis_y_omega_j2'] = extract_cross_cov_vis_to_joint(
@@ -2715,9 +2290,3 @@ class Agent:
         # Create DataFrame from the dictionary, preserving original index
         out_df = pd.DataFrame(data_for_df, index=results_df.index)
         return out_df
-
-    def calculate_vel_halflife(self):
-        I_j1, _, I_j2, _ = self.calculate_moments_of_inertia(rad_j2_input_mu = np.deg2rad(45))
-        t_half_j1 = I_j1 * np.log(2.0) / self.damping_factor_j1
-        t_half_j2 = I_j2 * np.log(2.0) / self.damping_factor_j2
-        print(f"t_half_j1: {t_half_j1}, t_half_j2: {t_half_j2}")
